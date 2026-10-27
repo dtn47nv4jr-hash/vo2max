@@ -242,6 +242,26 @@ td.lights { white-space: nowrap; }
   max-width: calc(100% - 32px);
 }
 #toast.show { opacity: 1; transform: translate(-50%, 0); }
+body.pausing #toast { bottom: calc(var(--tabs-h) + env(safe-area-inset-bottom) + 96px); }
+
+/* Pausen-Timer über der Navigation */
+#pause {
+  position: fixed; left: 50%; z-index: 11; bottom: calc(var(--tabs-h) + env(safe-area-inset-bottom) + 10px);
+  width: min(608px, calc(100% - 32px)); overflow: hidden;
+  display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 12px;
+  padding: 10px 16px 12px; border: 0; border-radius: var(--radius); cursor: pointer; text-align: left;
+  background: var(--ink); color: var(--bg);
+  transform: translate(-50%, 16px); opacity: 0; pointer-events: none; transition: opacity .25s, transform .25s;
+}
+#pause.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+#pause .p-fill { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: var(--accent); transform-origin: left; }
+#pause .p-label { font-size: 14px; line-height: 1.25; }
+#pause .p-time { font-size: 30px; line-height: 1; font-variant-numeric: tabular-nums; }
+#pause .p-stop { font-size: 13px; font-weight: 600; opacity: .7; }
+#pause.done { color: #fff; background: var(--green); animation: pause-blink .45s ease-in-out 12 alternate; }
+#pause.done .p-fill { display: none; }
+@keyframes pause-blink { to { background: #0b4f2b; } }
+body.pausing main { padding-bottom: calc(var(--tabs-h) + env(safe-area-inset-bottom) + 100px); }
 
 @media (max-width: 360px) {
   .set { grid-template-columns: 18px 54px auto 1fr auto 44px; gap: 6px; }

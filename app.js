@@ -8,7 +8,7 @@ const tabs = document.getElementById('tabs');
 // ---------- Speicher ----------
 const blankState = () => ({
   version: 1,
-  settings: { startDate: null, startPos: 0, freigabe: null, lastBackup: null },
+  settings: { startDate: null, startPos: 0, freigabe: null, lastBackup: null, pause: 90 },
   checkins: {},  // Datum → { rhr, vital: 0|1|2, feel: [] }
   sessions: {},  // geplanter Tag → Einheit
   changed: null,
@@ -469,6 +469,10 @@ function renderMehr() {
     <label class="field">Einstieg<select data-set="startPos">${posOptions(st.startPos || 0)}</select></label>
     <p class="hint">Woche 1 = Kalenderwoche mit dem Starttag. Änderungen verschieben nur den Plan, deine Einträge bleiben erhalten.</p>
   </section>`;
+  h += `<section class="card"><h2>Pausen-Timer</h2>
+    <label class="field">Satzpause<select data-set="pause">${PAUSES.map(p => `<option value="${p}" ${p === pauseLength() ? 'selected' : ''}>${p ? `${p} Sekunden` : 'Aus'}</option>`).join('')}</select></label>
+    <p class="hint">Startet, sobald du einen Satz abhakst; Antippen beendet die Pause. Beim einarmigen Rudern erst nach beiden Seiten. Am Ende Ton und Aufblinken, solange die App offen ist – bei stummgeschaltetem iPhone nur das Blinken. Während der Pause bleibt der Bildschirm an.</p>
+  </section>`;
   h += `<section class="card"><h2>Ärztliche Freigabe</h2>
     <label class="switch"><input type="checkbox" data-set="freigabeOn" ${st.freigabe ? 'checked' : ''}><span>Freigabe für Intervalle erhalten</span></label>
     ${st.freigabe ? `<label class="field">Datum der Freigabe<input type="date" data-set="freigabe" value="${st.freigabe}"></label>
@@ -505,7 +509,7 @@ function renderMehr() {
       <li>Intervalle erst nach ärztlicher Freigabe (Belastungs-EKG bis zur Ausbelastung).</li>
       <li>Vorschlag auf Basis deiner Daten, kein ärztlicher Trainingsplan.</li></ul></details>
   </section>
-  <p class="foot muted">Version 1.0 · funktioniert offline · keine Daten verlassen das Gerät, außer du exportierst sie.</p>`;
+  <p class="foot muted">Version 1.1 · funktioniert offline · keine Daten verlassen das Gerät, außer du exportierst sie.</p>`;
   return h;
 }
 
@@ -533,6 +537,132 @@ function toast(msg) {
   el.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.remove('show'), 2600);
+}
+
+// ---------- Pausen-Timer ----------
+// Zählt gegen die Uhrzeit, damit die Restzeit nach einem App-Wechsel stimmt.
+// Ton gibt es nur bei offener App: iOS hält Web-Apps im Hintergrund an.
+const PAUSES = [0, 60, 90, 120];   // 0 = aus
+const pauseLength = () => state.settings.pause ?? 90;
+let pause = null;                  // { key, end, total, done }
+let pauseTick = null, pauseHide = null, audio = null, wakeLock = null;
+
+// Was nach der Pause kommt; null = keine Pause (Seitenwechsel oder alles geschafft)
+function nextUp(s, day, id, i) {
+  const pair = EX[id].pair;
+  if (pair && s.ex[pair] && s.ex[pair][i] && !s.ex[pair][i].ok) return null;
+  for (const k of [pair, id].filter(Boolean)) {
+    const j = (s.ex[k] || []).findIndex(x => !x.ok);
+    if (j >= 0) return `Als Nächstes: ${EX[k].name}, Satz ${j + 1}`;
+  }
+  const ids = blocksFor(day, s.mode).filter(b => b.type === 'ex').map(b => b.id);
+  const pos = ids.indexOf(id);
+  const next = [...ids.slice(pos + 1), ...ids.slice(0, pos)].find(k => (s.ex[k] || []).some(x => !x.ok));
+  return next ? `Als Nächstes: ${EX[next].name}` : null;
+}
+
+// iOS gibt Ton nur frei, wenn er bei einem Tipp vorbereitet wurde
+function unlockAudio() {
+  try {
+    audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+    if (audio.state !== 'running') audio.resume();
+  } catch (e) { audio = null; }
+}
+
+function beep() {
+  if (!audio) return;
+  if (audio.state !== 'running') audio.resume();
+  const t0 = audio.currentTime + 0.05;
+  [0, 0.3, 0.6].forEach((d, k) => {
+    const o = audio.createOscillator(), g = audio.createGain();
+    o.frequency.value = k === 2 ? 1175 : 880;
+    g.gain.setValueAtTime(0.0001, t0 + d);
+    g.gain.exponentialRampToValueAtTime(0.6, t0 + d + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + d + 0.24);
+    o.connect(g).connect(audio.destination);
+    o.start(t0 + d);
+    o.stop(t0 + d + 0.26);
+  });
+}
+
+async function keepAwake(on) {
+  try {
+    if (on && !wakeLock && navigator.wakeLock) {
+      const lock = await navigator.wakeLock.request('screen');
+      if (!pause || pause.done) { lock.release(); return; }
+      wakeLock = lock;
+      lock.addEventListener('release', () => { if (wakeLock === lock) wakeLock = null; });
+    } else if (!on && wakeLock) {
+      const lock = wakeLock;
+      wakeLock = null;
+      await lock.release();
+    }
+  } catch (e) { /* nicht unterstützt oder abgelehnt */ }
+}
+
+function pauseBar() {
+  let el = document.getElementById('pause');
+  if (!el) {
+    el = document.createElement('button');
+    el.id = 'pause';
+    el.type = 'button';
+    el.addEventListener('click', stopPause);
+    document.body.appendChild(el);
+  }
+  return el;
+}
+
+function startPause(key, label) {
+  const total = pauseLength();
+  if (!total) return;
+  clearInterval(pauseTick);
+  clearTimeout(pauseHide);
+  pause = { key, end: Date.now() + total * 1000, total, done: false };
+  const el = pauseBar();
+  el.classList.remove('done');
+  el.innerHTML = `<span class="p-fill"></span><span class="p-label">Pause · ${esc(label)}</span><b class="p-time"></b><span class="p-stop">Stopp</span>`;
+  el.setAttribute('aria-label', `Pause läuft, ${label}. Antippen beendet die Pause.`);
+  el.classList.add('show');
+  document.body.classList.add('pausing');
+  keepAwake(true);
+  pauseTick = setInterval(updatePause, 250);
+  updatePause();
+}
+
+function updatePause() {
+  if (!pause || pause.done) return;
+  const left = Math.max(0, pause.end - Date.now());
+  if (left === 0) {
+    // Erst lange nach dem Ende zurück in der App: kein verspäteter Alarm mehr
+    if (Date.now() - pause.end > 60000) stopPause(); else finishPause();
+    return;
+  }
+  const sec = Math.ceil(left / 1000), el = pauseBar();
+  el.querySelector('.p-time').textContent = `${Math.floor(sec / 60)}:${pad2(sec % 60)}`;
+  el.querySelector('.p-fill').style.transform = `scaleX(${left / (pause.total * 1000)})`;
+}
+
+function finishPause() {
+  pause.done = true;
+  clearInterval(pauseTick);
+  keepAwake(false);
+  beep();
+  const el = pauseBar();
+  el.classList.add('done');
+  el.querySelector('.p-label').textContent = 'Pause vorbei';
+  el.querySelector('.p-time').textContent = 'Weiter!';
+  el.querySelector('.p-stop').textContent = 'OK';
+  el.setAttribute('aria-label', 'Pause vorbei. Antippen schließt den Hinweis.');
+  pauseHide = setTimeout(stopPause, 8000);
+}
+
+function stopPause() {
+  clearInterval(pauseTick);
+  clearTimeout(pauseHide);
+  pause = null;
+  keepAwake(false);
+  document.getElementById('pause')?.classList.remove('show', 'done');
+  document.body.classList.remove('pausing');
 }
 
 // ---------- Export / Import ----------
@@ -633,7 +763,16 @@ view.addEventListener('click', e => {
     const day = dayInfo(state.settings, date);
     switch (act) {
       case 'check': s.checks[t.dataset.k] = !s.checks[t.dataset.k]; break;
-      case 'setok': s.ex[id][i].ok = !s.ex[id][i].ok; break;
+      case 'setok': {
+        const set = s.ex[id][i], key = `${date}|${id}|${i}`;
+        set.ok = !set.ok;
+        if (set.ok) {
+          unlockAudio();
+          const label = nextUp(s, day, id, i);
+          if (label) startPause(key, label);
+        } else if (pause && pause.key === key) stopPause();
+        break;
+      }
       case 'cok': s.cardio[t.dataset.k].ok = !s.cardio[t.dataset.k].ok; break;
       case 'ivok': s.iv[i].ok = !s.iv[i].ok; break;
       case 'round': s.rounds[i] = !s.rounds[i]; break;
@@ -733,6 +872,7 @@ function onField(e) {
       case 'startPos': st.startPos = Number(t.value); break;
       case 'freigabeOn': st.freigabe = t.checked ? todayISO() : null; break;
       case 'freigabe': if (t.value) st.freigabe = t.value; break;
+      case 'pause': st.pause = Number(t.value); if (!st.pause) stopPause(); break;
     }
     save();
     render();
@@ -751,6 +891,8 @@ function ensureDraft() {
 // Tageswechsel, während die App im Hintergrund lag
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden && renderedDay !== todayISO()) { draft = null; ensureDraft(); render(); }
+  // Das System gibt die Bildschirmsperre im Hintergrund frei
+  if (!document.hidden && pause && !pause.done) { keepAwake(true); updatePause(); }
 });
 
 // ---------- Start ----------

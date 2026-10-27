@@ -28,8 +28,8 @@ const EX = {
 
   latzug_b:      { name: 'Latzug', reps: [12, 10, 8], kg: 50, step: 2.5, hint: 'Etwas leichter als am Dienstag, dafür sauber bis zur Brust.' },
   goblet:        { name: 'Goblet Squats', reps: [12, 10, 8], kg: 12, step: 2, hint: 'Mit Kurzhantel, Ziel 16 kg × 12. Auf eine Bank setzen, falls das Knie meckert.' },
-  rudern_l:      { name: 'Einarmiges Rudern links', reps: [12, 10, 8], kg: 20, step: 2, hint: 'Rücken gerade, Hantel zur Hüfte ziehen.' },
-  rudern_r:      { name: 'Einarmiges Rudern rechts', reps: [12, 10, 8], kg: 20, step: 2, hint: 'Rücken gerade, Hantel zur Hüfte ziehen.' },
+  rudern_l:      { name: 'Einarmiges Rudern links', reps: [12, 10, 8], kg: 20, step: 2, pair: 'rudern_r', hint: 'Rücken gerade, Hantel zur Hüfte ziehen.' },
+  rudern_r:      { name: 'Einarmiges Rudern rechts', reps: [12, 10, 8], kg: 20, step: 2, pair: 'rudern_l', hint: 'Rücken gerade, Hantel zur Hüfte ziehen.' },
   brustpresse_b: { name: 'Brustpresse', reps: [12, 10, 8], kg: 35, step: 2.5, hint: 'Kontrolliert zurück, Schultern unten.' },
   beinbeuger_b:  { name: 'Beinbeuger', reps: [12, 10, 10], kg: 50, step: 5, hint: 'Langsam ablassen (3 s).' },
   bulgarian:     { name: 'Bulgarian Split Squats', extra: true, reps: [10, 10], range: '8–10 je Bein', kg: 0, step: 0, bw: true, hint: 'Kurze Schrittstellung, Hand an einer Stange. Tiefe nach Kniegefühl – zugleich Balance-Training.' },
@@ -140,9 +140,9 @@ function dayTitle(day, mode = 'normal') {
 }
 
 function kraftHint(w) {
-  if (w.deload) return 'Entlastung: nur 2 Sätze, gleiche Gewichte.';
+  if (w.deload) return 'Entlastung: nur 2 Sätze, gleiche Gewichte · Satzpause 60–90 s.';
   if (w.phase === 1) return 'Satzpause 60–90 s · 1–2 Wdh. „im Tank“ · Anstrengung 7–8 von 10.';
-  return 'Doppelte Progression: alle Sätze am oberen Ende sauber geschafft → nächstes Mal mehr Gewicht. 1–2 Wdh. „im Tank“.';
+  return 'Satzpause 60–90 s · Doppelte Progression: alle Sätze am oberen Ende sauber geschafft → nächstes Mal mehr Gewicht. 1–2 Wdh. „im Tank“.';
 }
 
 // Ablauf einer Einheit als Liste von Bausteinen
