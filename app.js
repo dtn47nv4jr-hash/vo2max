@@ -10,6 +10,7 @@ const blankState = () => ({
   version: 1,
   settings: { startDate: null, startPos: 0, freigabe: null, lastBackup: null, pause: 90 },
   checkins: {},  // Datum → { rhr, vital: 0|1|2, feel: [] }
+  headaches: [], // Kopfschmerz-Einträge
   sessions: {},  // geplanter Tag → Einheit
   changed: null,
 });
@@ -17,7 +18,7 @@ const blankState = () => ({
 function loadState() {
   try {
     const s = JSON.parse(localStorage.getItem(STORE_KEY));
-    if (s && s.version === 1) return s;
+    if (s && s.version === 1) { s.headaches = s.headaches || []; return s; }
   } catch (e) { /* leer oder nicht lesbar */ }
   return blankState();
 }
@@ -63,10 +64,10 @@ function lightOf(c) {
 
 // Ein gelber Tag allein ändert nichts; zwei gelbe in Folge oder ein roter Tag schon.
 function effectOf(date) {
-  const t = lightOf(state.checkins[date]);
+  const t = dayLight(date);
   if (!t) return null;
   if (t === 'r') return 'rest';
-  if (t === 'y') return ['y', 'r'].includes(lightOf(state.checkins[addDays(date, -1)])) ? 'easy' : 'watch';
+  if (t === 'y') return ['y', 'r'].includes(dayLight(addDays(date, -1))) ? 'easy' : 'watch';
   return 'ok';
 }
 
@@ -78,6 +79,290 @@ function effectText(date) {
   if (e === 'watch') return 'Ein einzelner gelber Tag ist normal: Plan wie vorgesehen, aufmerksam bleiben. Morgen erneut prüfen.';
   if (e === 'ok') return 'Plan wie vorgesehen.';
   return '';
+}
+
+// ---------- Kopfschmerz-Protokoll ----------
+// Einträge für die ärztliche Abklärung. Ein Kopfschmerz färbt die Ampel des Tages mit:
+// jeder Eintrag Gelb, ab Stärke 7 Rot.
+const HA_ONSET = [['sleep', 'Hat mich geweckt'], ['wake', 'Beim Aufwachen'], ['day', 'Später am Tag']];
+const HA_LOC = [['stirn', 'Stirn'], ['schlaefe', 'Schläfe'], ['auge', 'Hinter dem Auge'], ['scheitel', 'Scheitel'], ['hinterkopf', 'Hinterkopf / Nacken'], ['ganz', 'Ganzer Kopf']];
+const HA_SIDE = [['links', 'Links'], ['rechts', 'Rechts'], ['beide', 'Beidseitig']];
+const HA_KIND = [['drueckend', 'Drückend / dumpf'], ['pochend', 'Pochend / pulsierend'], ['stechend', 'Stechend']];
+const HA_SYM = [['uebelkeit', 'Übelkeit'], ['licht', 'Lichtempfindlich'], ['laerm', 'Lärmempfindlich'], ['seh', 'Sehstörung / Flimmern'], ['schwindel', 'Schwindel'], ['nacken', 'Nackenschmerz'], ['kauen', 'Schmerz beim Kauen']];
+const HA_PRIOR = [['essen', 'Spätes / schweres Essen'], ['wenig', 'Wenig getrunken'], ['stress', 'Stress'], ['schnarchen', 'Schnarchen / Atemaussetzer bemerkt']];
+const HA_EFFECT = ['gut', 'teilweise', 'keine'];
+const MED_NAMES = ['Ibuprofen', 'Paracetamol', 'Aspirin (ASS)', 'Thomapyrin', 'Novaminsulfon'];
+const MED_WARN = 'Ab etwa 10 Tagen mit Schmerzmitteln im Monat können Schmerzmittel selbst Kopfschmerzen auslösen – mit dem Arzt besprechen.';
+
+const nameOf = (list, k) => list.find(x => x[0] === k)?.[1] ?? k;
+const nowTime = () => { const d = new Date(); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+const haSorted = () => [...state.headaches].sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+const haById = id => state.headaches.find(e => e.id === id);
+const haOn = date => state.headaches.filter(e => e.date === date);
+const haMonth = ym => state.headaches.filter(e => e.date.slice(0, 7) === ym);
+const hasMeds = e => e.meds.some(m => m.name.trim());
+const monthName = ym => new Date(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)) - 1, 1).toLocaleDateString('de-DE', { month: 'long', year: 'numeric' });
+const avgText = s => (s.avg == null ? '–' : deNum(s.avg.toFixed(1)));
+const plural = (n, one, many) => `${deNum(n)} ${n === 1 ? one : many}`;
+const medText = m => [m.name.trim(), m.dose.trim(), m.time && `um ${m.time}`].filter(Boolean).join(' ') + (m.effect ? `, Wirkung ${m.effect}` : '');
+
+function haMax(date) {
+  const p = haOn(date).map(e => e.pain).filter(n => n != null);
+  return p.length ? Math.max(...p) : null;
+}
+
+// Schlechteres Signal aus Morgen-Ampel und Kopfschmerz
+function dayLight(date) {
+  const a = lightOf(state.checkins[date]);
+  const b = haOn(date).length ? ((haMax(date) ?? 0) >= 7 ? 'r' : 'y') : null;
+  if (!a || !b) return a || b;
+  const rank = { g: 0, y: 1, r: 2 };
+  return rank[a] >= rank[b] ? a : b;
+}
+
+function newHeadache() {
+  const e = {
+    id: 'h' + Date.now().toString(36), date: todayISO(), time: nowTime(), onset: new Date().getHours() < 10 ? 'wake' : 'day', end: '', pain: null,
+    loc: [], side: '', kind: [], sym: [], alc: null, coffee: null, sleep: null, prior: [], meds: [], note: '',
+  };
+  state.headaches.push(e);
+  save();
+  return e;
+}
+
+function editHeadache(act, t) {
+  const e = haById(route.hid);
+  if (!e) return;
+  const k = t.dataset.k, v = t.dataset.v, i = Number(t.dataset.i);
+  switch (act) {
+    case 'ha-set': e[k] = k === 'pain' ? Number(v) : (k === 'side' && e[k] === v ? '' : v); break;
+    case 'ha-tog': e[k] = e[k].includes(v) ? e[k].filter(x => x !== v) : [...e[k], v]; break;
+    case 'ha-med-add': e.meds.push({ name: '', dose: '', time: nowTime(), effect: '' }); break;
+    case 'ha-med-del': e.meds.splice(i, 1); break;
+    case 'ha-med-eff': e.meds[i].effect = e.meds[i].effect === v ? '' : v; break;
+  }
+  save();
+  render();
+}
+
+function haStats(list) {
+  const pains = list.map(e => e.pain).filter(n => n != null);
+  return {
+    n: list.length,
+    days: new Set(list.map(e => e.date)).size,
+    medDays: new Set(list.filter(hasMeds).map(e => e.date)).size,
+    avg: pains.length ? pains.reduce((a, b) => a + b, 0) / pains.length : null,
+    max: pains.length ? Math.max(...pains) : null,
+  };
+}
+
+function haByMonth() {
+  const months = {};
+  for (const e of state.headaches) (months[e.date.slice(0, 7)] ||= []).push(e);
+  return Object.entries(months).sort((a, b) => b[0].localeCompare(a[0]));
+}
+
+function haDuration(e) {
+  if (!e.time || !e.end) return '';
+  const toMin = s => Number(s.slice(0, 2)) * 60 + Number(s.slice(3, 5));
+  let m = toMin(e.end) - toMin(e.time);
+  if (m < 0) m += 1440;
+  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}`;
+}
+
+function haLine(e) {
+  const meds = e.meds.map(m => m.name.trim()).filter(Boolean).join(', ');
+  return `${e.time || '–'} · ${nameOf(HA_ONSET, e.onset)} · Stärke ${e.pain ?? '–'}/10${meds ? ` · ${meds}` : ''}`;
+}
+
+function monthLine(ym) {
+  const s = haStats(haMonth(ym));
+  return `${monthName(ym)}: ${plural(s.days, 'Tag', 'Tage')} mit Kopfschmerz, ${s.medDays} mit Schmerzmitteln${s.avg != null ? `, Ø Stärke ${avgText(s)}` : ''}.`;
+}
+const medBanner = ym => (haStats(haMonth(ym)).medDays >= 10 ? `<div class="banner y">${MED_WARN}</div>` : '');
+
+// Karte auf „Heute“
+function kopfCard(date) {
+  const today = haOn(date).sort((a, b) => a.time.localeCompare(b.time));
+  return `<section class="card">
+    <h2>Kopfschmerz-Protokoll</h2>
+    ${today.map(e => `<button class="row" data-act="ha-open" data-id="${e.id}"><span>${esc(haLine(e))}</span><span class="muted">ändern ›</span></button>`).join('')}
+    <div class="actions"><button class="ghost" data-act="ha-new">+ Kopfschmerz eintragen</button><button class="link" data-act="ha-list">Übersicht & Bericht ›</button></div>
+    <p class="hint">${monthLine(date.slice(0, 7))}</p>${medBanner(date.slice(0, 7))}
+  </section>`;
+}
+
+// Karte im „Verlauf“
+function kopfSummaryCard() {
+  const ym = todayISO().slice(0, 7);
+  return `<section class="card"><h2>Kopfschmerzen</h2>
+    <p>${monthLine(ym)}</p>${medBanner(ym)}
+    <button class="ghost wide" data-act="ha-list">Übersicht & Bericht ›</button>
+  </section>`;
+}
+
+function renderKopf() {
+  let h = '<header class="page-head"><button class="back" data-act="ha-back">‹ Zurück</button><h1>Kopfschmerzen</h1></header>';
+  const months = haByMonth();
+  if (!months.length) {
+    return h + '<section class="card"><p class="muted">Noch keine Einträge.</p><button class="primary wide" data-act="ha-new">+ Kopfschmerz eintragen</button></section>';
+  }
+  h += `<section class="card"><h2>Monate</h2><div class="scroll"><table>
+    <thead><tr><th>Monat</th><th class="r">Tage</th><th class="r">Schmerzmittel</th><th class="r">Ø Stärke</th><th class="r">Morgens</th></tr></thead>
+    <tbody>${months.map(([ym, list]) => {
+      const s = haStats(list);
+      return `<tr><td>${monthName(ym)}</td><td class="r">${s.days}</td><td class="r${s.medDays >= 10 ? ' warn' : ''}">${s.medDays}</td>
+        <td class="r">${avgText(s)}</td><td class="r">${list.filter(e => e.onset !== 'day').length} / ${s.n}</td></tr>`;
+    }).join('')}</tbody></table></div>
+    <p class="hint">Tage = Tage mit Kopfschmerz · Schmerzmittel = Tage mit Einnahme · Morgens = Einträge „hat mich geweckt“ oder „beim Aufwachen“. ${MED_WARN}</p>
+  </section>`;
+  h += `<section class="card"><h2>Für den Arzt</h2>
+    <p class="hint">Der Bericht fasst alle Einträge zusammen und listet sie einzeln auf – zum Senden per Mail oder Nachricht oder zum Sichern in Notizen (von dort druckbar).</p>
+    <button class="primary wide" data-act="ha-report">Bericht teilen</button>
+    <button class="ghost wide" data-act="ha-csv">Tabelle für Excel (CSV)</button>
+  </section>`;
+  h += `<section class="card"><h2>Einträge</h2>
+    ${haSorted().reverse().map(e => `<button class="row" data-act="ha-open" data-id="${e.id}"><span><small>${fmtDay(e.date)}</small>${esc(haLine(e))}</span><span class="muted">›</span></button>`).join('')}
+    <button class="primary wide" data-act="ha-new">+ Kopfschmerz eintragen</button>
+  </section>`;
+  return h;
+}
+
+function renderKopfEdit() {
+  const e = haById(route.hid);
+  if (!e) { route.tab = 'kopf'; return renderKopf(); }
+  const on = (key, k) => (Array.isArray(e[key]) ? e[key].includes(k) : String(e[key]) === String(k));
+  const chips = (key, list) => `<div class="chips">${list.map(([k, l]) => `<button data-act="ha-tog" data-k="${key}" data-v="${k}" class="chip ${on(key, k) ? 'on' : ''}" aria-pressed="${on(key, k)}">${l}</button>`).join('')}</div>`;
+  const seg = (key, list, cls = '') => `<div class="seg ${cls}">${list.map(([k, l]) => `<button data-act="ha-set" data-k="${key}" data-v="${k}" class="${on(key, k) ? 'on' : ''}" aria-pressed="${on(key, k)}">${l}</button>`).join('')}</div>`;
+  const names = [...new Set([...MED_NAMES, ...state.headaches.flatMap(x => x.meds.map(m => m.name.trim())).filter(Boolean)])];
+  const meds = e.meds.map((m, i) => `<div class="med">
+      <div class="med-row">
+        <label>Mittel<input data-hm="name" data-i="${i}" value="${esc(m.name)}" list="med-names" placeholder="z. B. Ibuprofen" autocomplete="off"></label>
+        <label>Dosis<input data-hm="dose" data-i="${i}" value="${esc(m.dose)}" placeholder="400 mg"></label>
+        <label>Uhrzeit<input type="time" data-hm="time" data-i="${i}" value="${esc(m.time)}"></label>
+      </div>
+      <div class="label">Wirkung</div>
+      <div class="med-foot"><div class="seg">${HA_EFFECT.map(x => `<button data-act="ha-med-eff" data-i="${i}" data-v="${x}" class="${m.effect === x ? 'on' : ''}" aria-pressed="${m.effect === x}">${x}</button>`).join('')}</div>
+        <button class="mini" data-act="ha-med-del" data-i="${i}">Entfernen</button></div>
+    </div>`).join('');
+  const flag = e.sym.includes('seh') || e.sym.includes('kauen');
+  return `<header class="page-head"><button class="back" data-act="ha-done">‹ Zurück</button><div class="kicker">${fmtLong(e.date)}</div><h1>Kopfschmerz</h1></header>
+  <section class="card"><h2>Wann</h2>
+    <label class="field">Datum<input type="date" data-h="date" value="${e.date}"></label>
+    <div class="pair"><label class="field">Beginn<input type="time" data-h="time" value="${e.time}"></label>
+      <label class="field">Ende (falls vorbei)<input type="time" data-h="end" value="${e.end}"></label></div>
+    ${seg('onset', HA_ONSET)}
+  </section>
+  <section class="card"><h2>Stärke</h2>
+    ${seg('pain', Array.from({ length: 10 }, (_, i) => [i + 1, String(i + 1)]), 'pain')}
+    <p class="hint">1 = kaum spürbar · 5 = deutlich, stört · 10 = stärkster vorstellbarer Schmerz. Ab 7 wird die Ampel des Tages rot.</p>
+  </section>
+  <section class="card"><h2>Schmerzmittel</h2>
+    ${meds || '<p class="muted">Keine eingetragen.</p>'}
+    <button class="ghost wide" data-act="ha-med-add">+ Schmerzmittel</button>
+    <datalist id="med-names">${names.map(n => `<option value="${esc(n)}">`).join('')}</datalist>
+  </section>
+  <section class="card"><h2>Ort und Art</h2>
+    <div class="label">Wo</div>${chips('loc', HA_LOC)}
+    <div class="label">Seite</div>${seg('side', HA_SIDE)}
+    <div class="label">Wie</div>${chips('kind', HA_KIND)}
+  </section>
+  <section class="card"><h2>Begleitsymptome</h2>${chips('sym', HA_SYM)}
+    ${flag ? '<div class="banner r">Sehstörung oder Schmerz beim Kauen bitte nicht bis zum Checkup aufschieben, sondern zeitnah ärztlich abklären – bei plötzlichem Sehverlust sofort.</div>' : ''}
+  </section>
+  <section class="card"><h2>Vorabend und Nacht</h2>
+    <div class="trio">
+      <label>Alkohol (Gläser)<input data-h="alc" value="${deNum(e.alc)}" inputmode="decimal" placeholder="0"></label>
+      <label>Kaffee am Vortag (Tassen)<input data-h="coffee" value="${deNum(e.coffee)}" inputmode="decimal" placeholder="0"></label>
+      <label>Schlaf (Stunden)<input data-h="sleep" value="${deNum(e.sleep)}" inputmode="decimal" placeholder="7"></label>
+    </div>
+    <p class="hint">Schlafdauer z. B. aus der Health-App (Schlaf).</p>
+    ${chips('prior', HA_PRIOR)}
+  </section>
+  <section class="card"><label class="note">Notiz<textarea data-h="note" rows="3" placeholder="z. B. besser nach dem Frühstück, Nacken verspannt">${esc(e.note)}</textarea></label>
+    <div class="actions"><button class="primary" data-act="ha-done">Fertig</button><button class="ghost" data-act="ha-del">Löschen</button></div>
+  </section>
+  <details class="card fold"><summary>Warnzeichen – sofort ärztliche Hilfe</summary><ul class="plain">
+    <li>Plötzlich einsetzender, extrem starker Kopfschmerz</li>
+    <li>Lähmung, Taubheit, Sprach- oder Sehstörung, Verwirrtheit</li>
+    <li>Fieber mit steifem Nacken</li>
+    <li>Kopfschmerz nach einem Sturz oder Schlag auf den Kopf</li></ul>
+    <p class="hint">Dann Notruf 112. Neue oder zunehmende Kopfschmerzen ab 50 zeitnah beim Hausarzt abklären, nicht erst beim Checkup. Die App dokumentiert nur und ersetzt keine ärztliche Beurteilung.</p>
+  </details>`;
+}
+
+// Bericht als Text für den Arzt
+function haReport() {
+  const list = haSorted();
+  const s = haStats(list);
+  const count = (key, names) => {
+    const c = {};
+    for (const e of list) for (const k of e[key]) c[k] = (c[k] || 0) + 1;
+    return Object.entries(c).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${nameOf(names, k)} ${n}×`).join(', ');
+  };
+  const meds = {};
+  for (const e of list) for (const m of e.meds.filter(x => x.name.trim())) {
+    const g = (meds[m.name.trim()] ||= { n: 0, doses: new Set(), eff: {} });
+    g.n++;
+    if (m.dose.trim()) g.doses.add(m.dose.trim());
+    if (m.effect) g.eff[m.effect] = (g.eff[m.effect] || 0) + 1;
+  }
+  const L = ['KOPFSCHMERZ-PROTOKOLL', `Zeitraum ${fmtFull(list[0].date)} – ${fmtFull(list[list.length - 1].date)} · erstellt am ${fmtFull(todayISO())}`, '', 'ZUSAMMENFASSUNG'];
+  L.push(`Einträge: ${s.n} an ${plural(s.days, 'Tag', 'Tagen')}`);
+  L.push(`Beginn: ${HA_ONSET.map(([k, l]) => `${l} ${list.filter(e => e.onset === k).length}×`).join(' · ')}`);
+  if (s.avg != null) L.push(`Stärke (1–10): Ø ${avgText(s)}, höchste ${s.max}`);
+  L.push(`Tage mit Schmerzmitteln: ${s.medDays}`);
+  for (const [name, g] of Object.entries(meds)) {
+    const eff = HA_EFFECT.filter(x => g.eff[x]).map(x => `${x} ${g.eff[x]}×`).join(', ');
+    L.push(`  ${name}: ${g.n}× eingenommen${g.doses.size ? ` (${[...g.doses].join(', ')})` : ''}${eff ? ` – Wirkung ${eff}` : ''}`);
+  }
+  for (const [key, names, label] of [['loc', HA_LOC, 'Ort'], ['kind', HA_KIND, 'Art'], ['sym', HA_SYM, 'Begleitsymptome'], ['prior', HA_PRIOR, 'Vorabend/Nacht']]) {
+    const c = count(key, names);
+    if (c) L.push(`${label}: ${c}`);
+  }
+  for (const [ym] of haByMonth().reverse()) {
+    const m = haStats(haMonth(ym));
+    L.push(`${monthName(ym)}: ${plural(m.days, 'Kopfschmerztag', 'Kopfschmerztage')}, ${plural(m.medDays, 'Schmerzmitteltag', 'Schmerzmitteltage')}${m.avg != null ? `, Ø Stärke ${avgText(m)}` : ''}`);
+  }
+  L.push('', 'EINZELNE EINTRÄGE');
+  for (const e of list) {
+    const day = parseDate(e.date).toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' });
+    const dur = haDuration(e);
+    L.push('', `${day}, ${e.time || '–'} Uhr (${nameOf(HA_ONSET, e.onset)})${e.end ? `, bis ${e.end} Uhr${dur ? ` (${dur})` : ''}` : ''} · Stärke ${e.pain ?? '–'}/10`);
+    const where = [e.loc.map(k => nameOf(HA_LOC, k)).join(', '), e.side && nameOf(HA_SIDE, e.side), e.kind.map(k => nameOf(HA_KIND, k)).join(', ')].filter(Boolean).join(' · ');
+    if (where) L.push(`  ${where}`);
+    if (e.sym.length) L.push(`  Begleitsymptome: ${e.sym.map(k => nameOf(HA_SYM, k)).join(', ')}`);
+    const em = e.meds.filter(m => m.name.trim());
+    L.push(`  Schmerzmittel: ${em.length ? em.map(medText).join('; ') : 'keine'}`);
+    const prior = [e.alc != null && `Alkohol ${plural(e.alc, 'Glas', 'Gläser')}`, e.coffee != null && `Kaffee am Vortag ${plural(e.coffee, 'Tasse', 'Tassen')}`,
+      e.sleep != null && `Schlaf ${deNum(e.sleep)} h`, ...e.prior.map(k => nameOf(HA_PRIOR, k))].filter(Boolean);
+    if (prior.length) L.push(`  Vorabend/Nacht: ${prior.join(' · ')}`);
+    if (e.note.trim()) L.push(`  Notiz: ${e.note.trim()}`);
+  }
+  L.push('', 'Selbst erfasst; Stärke nach eigener Einschätzung (1 = kaum spürbar, 10 = stärkster vorstellbarer Schmerz).');
+  return L.join('\n');
+}
+
+async function shareReport() {
+  if (!state.headaches.length) { toast('Noch keine Einträge.'); return; }
+  const text = haReport();
+  if (navigator.share) {
+    try { await navigator.share({ title: 'Kopfschmerz-Protokoll', text }); return; }
+    catch (e) { if (e.name === 'AbortError') return; }
+  }
+  try { await navigator.clipboard.writeText(text); toast('Bericht in die Zwischenablage kopiert'); }
+  catch (e) { toast('Teilen ist hier nicht möglich.'); }
+}
+
+function haCSV(t) {
+  const rows = haSorted().map(e => [
+    fmtFull(e.date), e.time, nameOf(HA_ONSET, e.onset), e.end, haDuration(e), e.pain ?? '',
+    e.loc.map(k => nameOf(HA_LOC, k)).join(', '), e.side ? nameOf(HA_SIDE, e.side) : '', e.kind.map(k => nameOf(HA_KIND, k)).join(', '),
+    e.sym.map(k => nameOf(HA_SYM, k)).join(', '), e.meds.filter(m => m.name.trim()).map(medText).join(' / '),
+    deNum(e.alc), deNum(e.coffee), deNum(e.sleep), e.prior.map(k => nameOf(HA_PRIOR, k)).join(', '), e.note,
+  ]);
+  return csvFile(`vo2max-kopfschmerz-${t}.csv`, ['Datum', 'Beginn', 'Zeitpunkt', 'Ende', 'Dauer', 'Stärke', 'Ort', 'Seite', 'Art', 'Begleitsymptome', 'Schmerzmittel',
+    'Alkohol (Gläser)', 'Kaffee Vortag (Tassen)', 'Schlaf (h)', 'Vorabend/Nacht', 'Notiz'], rows);
 }
 
 // ---------- Einheiten ----------
@@ -291,7 +576,7 @@ function weekBadge(day) {
 
 function backupBanner() {
   const st = state.settings;
-  const dates = [...Object.keys(state.sessions).filter(d => hasProgress(state.sessions[d])), ...Object.keys(state.checkins)].sort();
+  const dates = [...Object.keys(state.sessions).filter(d => hasProgress(state.sessions[d])), ...Object.keys(state.checkins), ...state.headaches.map(e => e.date)].sort();
   if (!dates.length) return '';
   const since = daysBetween((st.lastBackup || dates[0]).slice(0, 10), todayISO());
   const newer = !st.lastBackup || (state.changed && state.changed > st.lastBackup);
@@ -318,10 +603,10 @@ function setupCard() {
 function ampelCard(date) {
   const c = state.checkins[date];
   if (c && !draft) {
-    const l = lightOf(c);
+    const l = dayLight(date);
     return `<section class="card ampel">
       <div class="ampel-row"><span class="dot ${l}" aria-hidden="true"></span>
-        <div><b>Erholungsampel: ${LIGHT_NAME[l]}</b><small>Ruhepuls gestern ${c.rhr ?? '–'} · ${VITAL[c.vital ?? 0]}${(c.feel || []).length ? ' · ' + c.feel.map(f => FEEL.find(x => x[0] === f)[1]).join(', ') : ''}</small></div>
+        <div><b>Erholungsampel: ${LIGHT_NAME[l]}</b><small>Ruhepuls gestern ${c.rhr ?? '–'} · ${VITAL[c.vital ?? 0]}${(c.feel || []).length ? ' · ' + c.feel.map(f => FEEL.find(x => x[0] === f)[1]).join(', ') : ''}${haOn(date).length ? ` · Kopfschmerz ${haMax(date) ?? '–'}/10` : ''}</small></div>
         <button class="mini" data-act="ampel-edit">Ändern</button></div>
       <p class="hint">${esc(effectText(date))}</p>
     </section>`;
@@ -362,6 +647,7 @@ function renderHeute() {
   h += backupBanner();
   if (day.kind === 'setup') return h + setupCard();
   h += ampelCard(date);
+  h += kopfCard(date);
   if (day.kind === 'pre') {
     const n = daysBetween(date, state.settings.startDate);
     return h + `<section class="card"><h2>Noch ${n} ${n === 1 ? 'Tag' : 'Tage'} bis zum Start</h2><p>Dein Plan beginnt am ${fmtLong(state.settings.startDate)}.</p></section>`;
@@ -379,7 +665,7 @@ function renderTag() {
   let h = `<header class="page-head"><button class="back" data-act="back">‹ Zurück</button><div class="kicker">${fmtLong(route.date)}</div><div>${weekBadge(day)}</div></header>`;
   if (day.kind === 'setup' || day.kind === 'pre') return h + '<section class="card"><p>Dieser Tag liegt vor dem Planstart.</p></section>';
   const c = state.checkins[route.date];
-  if (c) h += `<div class="ampel-mini"><span class="dot ${lightOf(c)}"></span>Ampel ${LIGHT_NAME[lightOf(c)]} · Ruhepuls ${c.rhr ?? '–'}</div>`;
+  if (c) h += `<div class="ampel-mini"><span class="dot ${dayLight(route.date)}"></span>Ampel ${LIGHT_NAME[dayLight(route.date)]} · Ruhepuls ${c.rhr ?? '–'}</div>`;
   return h + sessionHTML(day);
 }
 
@@ -434,7 +720,7 @@ function renderVerlauf() {
     const w = dayInfo(st, m < st.startDate ? st.startDate : m).week;
     const s = weekStats(m);
     const lights = { g: 0, y: 0, r: 0 };
-    for (let i = 0; i < 7; i++) { const l = lightOf(state.checkins[addDays(m, i)]); if (l) lights[l]++; }
+    for (let i = 0; i < 7; i++) { const l = dayLight(addDays(m, i)); if (l) lights[l]++; }
     rows.push(`<tr><td>${fmtShort(m)}</td><td>${esc(weekLabel(w).replace('Phase ', 'P').replace(' · Woche ', ' W'))}</td>
       <td class="r">${s.minutes}/${weekTarget(w)}</td><td class="r">${s.kraft}/2</td>
       <td class="lights">${lights.g ? `<span class="dot g"></span>${lights.g}` : ''} ${lights.y ? `<span class="dot y"></span>${lights.y}` : ''} ${lights.r ? `<span class="dot r"></span>${lights.r}` : ''}</td></tr>`);
@@ -452,10 +738,11 @@ function renderVerlauf() {
     ${hist.length ? `<table><tbody>${hist.map(x => `<tr><td>${fmtShort(x.d)}</td><td>${esc(setsText(x.sets.filter(y => y.ok)))}</td></tr>`).join('')}</tbody></table>`
       : '<p class="muted">Noch keine erledigten Sätze.</p>'}
   </section>`;
+  h += kopfSummaryCard();
   // Ampel
   const cks = Object.keys(state.checkins).sort().reverse().slice(0, 21);
   h += `<section class="card"><h2>Erholungsampel</h2>
-    ${cks.length ? `<table><tbody>${cks.map(d => { const c = state.checkins[d], l = lightOf(c); return `<tr><td>${fmtDay(d)}</td><td><span class="dot ${l}"></span>${LIGHT_NAME[l]}</td><td class="r">${c.rhr ?? '–'}/min</td></tr>`; }).join('')}</tbody></table>`
+    ${cks.length ? `<table><tbody>${cks.map(d => { const c = state.checkins[d], l = dayLight(d); return `<tr><td>${fmtDay(d)}</td><td><span class="dot ${l}"></span>${LIGHT_NAME[l]}</td><td class="r">${c.rhr ?? '–'}/min</td></tr>`; }).join('')}</tbody></table>`
       : '<p class="muted">Noch keine Einträge.</p>'}
   </section>`;
   return h;
@@ -495,6 +782,7 @@ function renderMehr() {
       <li><span class="dot g"></span><b>Grün:</b> Ruhepuls ≤ 70, keine Abweichung, fit → Plan wie vorgesehen.</li>
       <li><span class="dot y"></span><b>Gelb:</b> 71–74, eine Abweichung oder müde/Stress → ein gelber Tag ist normal; zwei in Folge: Intervalle → Zone 2, Kraft 2 Sätze.</li>
       <li><span class="dot r"></span><b>Rot:</b> ≥ 75, mehrere Abweichungen, Infekt, Schmerz → Ruhetag oder Spaziergang.</li>
+      <li>Kopfschmerz am selben Tag zählt als Abweichung (Gelb), ab Stärke 7 Rot.</li>
       <li>Das schlechtere Signal zählt. HRV nur als Trend, nicht für die Tagesentscheidung.</li></ul></details>
     <details><summary>Gewichte steigern</summary><ul>
       <li>Alle Sätze am oberen Ende sauber geschafft → nächstes Mal +2,5 kg (Oberkörper) bzw. +5 kg (Beinpresse, Hip Thrust, Beinbeuger), Kurzhanteln eine Stufe.</li>
@@ -509,7 +797,7 @@ function renderMehr() {
       <li>Intervalle erst nach ärztlicher Freigabe (Belastungs-EKG bis zur Ausbelastung).</li>
       <li>Vorschlag auf Basis deiner Daten, kein ärztlicher Trainingsplan.</li></ul></details>
   </section>
-  <p class="foot muted">Version 1.1 · funktioniert offline · keine Daten verlassen das Gerät, außer du exportierst sie.</p>`;
+  <p class="foot muted">Version 1.2 · funktioniert offline · keine Daten verlassen das Gerät, außer du exportierst sie.</p>`;
   return h;
 }
 
@@ -517,9 +805,10 @@ function renderMehr() {
 function render() {
   renderedDay = todayISO();
   ensureDraft();
-  const page = { heute: renderHeute, tag: renderTag, woche: renderWoche, verlauf: renderVerlauf, mehr: renderMehr }[route.tab];
+  const page = { heute: renderHeute, tag: renderTag, woche: renderWoche, verlauf: renderVerlauf, mehr: renderMehr, kopf: renderKopf, kopfedit: renderKopfEdit }[route.tab];
   view.innerHTML = page();
-  const active = route.tab === 'tag' ? route.back : route.tab;
+  const kopfTab = route.kopfBack || 'verlauf';
+  const active = { tag: route.back, kopf: kopfTab, kopfedit: route.back === 'kopf' ? kopfTab : route.back }[route.tab] || route.tab;
   for (const b of tabs.querySelectorAll('button')) b.classList.toggle('on', b.dataset.tab === active);
 }
 
@@ -717,7 +1006,7 @@ function exportCSV() {
   }
   for (const d of Object.keys(state.checkins).sort()) {
     const c = state.checkins[d];
-    ampel.push([fmtFull(d), c.rhr ?? '', VITAL[c.vital ?? 0], (c.feel || []).map(f => FEEL.find(x => x[0] === f)[1]).join(', '), LIGHT_NAME[lightOf(c)]]);
+    ampel.push([fmtFull(d), c.rhr ?? '', VITAL[c.vital ?? 0], (c.feel || []).map(f => FEEL.find(x => x[0] === f)[1]).join(', '), LIGHT_NAME[dayLight(d)]]);
   }
   const t = todayISO();
   shareFiles([
@@ -725,6 +1014,7 @@ function exportCSV() {
     csvFile(`vo2max-kraft-${t}.csv`, ['Datum', 'Einheit', 'Übung', 'Satz', 'Wdh', 'kg', 'erledigt'], kraft),
     csvFile(`vo2max-ausdauer-${t}.csv`, ['Datum', 'Einheit', 'Block', 'Minuten', 'Gerät', 'Puls', 'erledigt'], ausdauer),
     csvFile(`vo2max-ampel-${t}.csv`, ['Datum', 'Ruhepuls Vortag', 'Vitalwerte', 'Befinden', 'Ampel'], ampel),
+    haCSV(t),
   ]);
 }
 
@@ -732,8 +1022,9 @@ async function importJSON(file) {
   try {
     const s = JSON.parse(await file.text());
     if (!s || s.version !== 1 || !s.settings || !s.sessions || !s.checkins) throw new Error('format');
+    s.headaches = s.headaches || [];
     const n = Object.keys(s.sessions).length;
-    if (!confirm(`Backup mit ${n} Einheiten einspielen? Die aktuellen Daten auf diesem Gerät werden ersetzt.`)) return;
+    if (!confirm(`Backup mit ${n} Einheiten und ${s.headaches.length} Kopfschmerz-Einträgen einspielen? Die aktuellen Daten auf diesem Gerät werden ersetzt.`)) return;
     state = s;
     save();
     render();
@@ -834,6 +1125,20 @@ view.addEventListener('click', e => {
     case 'open-day': go('tag', { date: t.dataset.d, back: route.tab === 'tag' ? route.back : route.tab }); break;
     case 'back': go(route.back); break;
     case 'week': route.weekOffset = t.dataset.d === '0' ? 0 : route.weekOffset + Number(t.dataset.d); render(); break;
+    case 'ha-new': go('kopfedit', { hid: newHeadache().id, back: route.tab }); break;
+    case 'ha-open': go('kopfedit', { hid: t.dataset.id, back: route.tab }); break;
+    case 'ha-list': go('kopf', { kopfBack: route.tab }); break;
+    case 'ha-back': go(route.kopfBack || 'verlauf'); break;
+    case 'ha-done': go(route.back); break;
+    case 'ha-del':
+      if (!confirm('Diesen Kopfschmerz-Eintrag löschen?')) return;
+      state.headaches = state.headaches.filter(x => x.id !== route.hid);
+      save();
+      go(route.back);
+      break;
+    case 'ha-set': case 'ha-tog': case 'ha-med-add': case 'ha-med-del': case 'ha-med-eff': editHeadache(act, t); break;
+    case 'ha-report': shareReport(); break;
+    case 'ha-csv': shareFiles([haCSV(todayISO())]); break;
     case 'export-json': exportJSON(); break;
     case 'export-csv': exportCSV(); break;
     case 'import': document.getElementById('import-file').click(); break;
@@ -842,6 +1147,17 @@ view.addEventListener('click', e => {
 
 function onField(e) {
   const t = e.target;
+  if (t.dataset.h || t.dataset.hm) {
+    const h = haById(route.hid);
+    if (!h) return;
+    const v = t.value;
+    if (t.dataset.hm) h.meds[Number(t.dataset.i)][t.dataset.hm] = v;
+    else if (t.dataset.h === 'date') { if (v) h.date = v; }
+    else if (['alc', 'coffee', 'sleep'].includes(t.dataset.h)) h[t.dataset.h] = num(v);
+    else h[t.dataset.h] = v;
+    save();
+    return;
+  }
   if (t.dataset.f) {
     const date = t.closest('[data-date]').dataset.date;
     const s = ensureSession(date);
