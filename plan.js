@@ -42,6 +42,8 @@ const KRAFT_B = { app: ['latzug_b', 'goblet', 'rudern_l', 'rudern_r', 'brustpres
 
 const DEV_STUDIO = ['Ergometer', 'Rudergerät', 'Crosstrainer'];
 const DEV_OUT = ['Rad outdoor', 'Gehen outdoor', 'Schwimmen', 'Nordic Walking', 'Lauf-Geh-Wechsel'];
+// Trittfrequenz-Hinweis für das Ergometer (Trainingsbewertung, „Ausdauereinheiten im Detail“) – seit 1.3
+const CADENCE = ' Ergometer: Trittfrequenz 80–90/min, niedrige Stufe – nach Puls steuern, nicht nach Watt.';
 
 const BALANCE = [
   'Einbeinstand 3 × 30 s je Bein (Steigerung: Augen zu, Kopf langsam drehen, weiche Matte)',
@@ -172,7 +174,7 @@ function blocksFor(day, mode = 'normal') {
         ...strength(k.extra),
         { type: 'cardio', key: 'anhang', label: 'Zone 2 · Ausdauer-Anhang', min: w.anhang,
           dev: a ? DEV_STUDIO : ['Rudergerät', 'Crosstrainer', 'Ergometer'],
-          hint: 'Bewusst locker: Puls ~115–130, ganze Sätze sprechen. Erst Kraft, dann Ausdauer.' },
+          hint: 'Bewusst locker: Puls ~115–130, ganze Sätze sprechen. Erst Kraft, dann Ausdauer.' + CADENCE },
       ];
     }
     case 'z2out':
@@ -195,7 +197,7 @@ function blocksFor(day, mode = 'normal') {
       }
       return [
         { type: 'cardio', key: 'so', label: 'Zone 2 · Studio', min: sundayMinutes(w), dev: DEV_STUDIO,
-          hint: 'Erste 5 min ganz locker, dann gleichmäßig ~115–130. Geräte gern abwechseln.' },
+          hint: 'Erste 5 min ganz locker, dann gleichmäßig ~115–130. Geräte gern abwechseln.' + CADENCE },
         balance, yoga,
       ];
     }

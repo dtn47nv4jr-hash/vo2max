@@ -411,7 +411,8 @@ function hasProgress(s) {
     || Object.values(s.checks).some(Boolean)
     || Object.values(s.ex).some(a => a.some(x => x.ok))
     || Object.values(s.cardio).some(c => c.ok)
-    || s.iv.some(x => x.ok) || s.rounds.some(Boolean);
+    || s.iv.some(x => x.ok) || s.rounds.some(Boolean)
+    || (!!s.stand && (s.stand.l != null || s.stand.r != null));
 }
 
 function statusOf(date) {
@@ -441,14 +442,33 @@ function allHit(id, sets) {
 const STATUS_LABEL = { open: 'Offen', started: 'Begonnen', done: 'Erledigt', skipped: 'Ausgelassen' };
 const STATUS_ICON = { open: '○', started: '◐', done: '✓', skipped: '–' };
 
-function checkHTML(b, s) {
+function checkHTML(b, s, day) {
   const on = !!s.checks[b.key];
   return `<div class="block">
     <button class="check ${on ? 'on' : ''}" data-act="check" data-k="${b.key}" aria-pressed="${on}">
       <span class="box" aria-hidden="true"></span><span><b>${esc(b.label)}</b><small>${esc(b.detail || '')}</small></span>
     </button>
+    ${b.key === 'balance' ? standHTML(s, day) : ''}
     ${b.list ? `<details class="more"><summary>Übungen</summary><ul>${b.list.map(x => `<li>${esc(x)}</li>`).join('')}</ul></details>` : ''}
   </div>`;
+}
+
+// Einbeinstand in Sekunden je Bein (bester von 3 Versuchen) – Fortschritt und Seitenunterschied (seit 1.3)
+function lastStand(date) {
+  const d = Object.keys(state.sessions).filter(x => x < date).sort().reverse()
+    .find(x => { const t = state.sessions[x].stand; return !!t && (t.l != null || t.r != null); });
+  return d ? { date: d, ...state.sessions[d].stand } : null;
+}
+
+function standHTML(s, day) {
+  const t = s.stand || {};
+  const last = lastStand(day.date);
+  const sec = v => (v == null ? '–' : `${deNum(v)} s`);
+  return `<div class="c-row two">
+      <label>Einbeinstand links (s)<input data-f="standl" value="${deNum(t.l)}" placeholder="Sek." inputmode="decimal"></label>
+      <label>Einbeinstand rechts (s)<input data-f="standr" value="${deNum(t.r)}" placeholder="Sek." inputmode="decimal"></label>
+    </div>
+    <p class="hint">Je Bein den besten von 3 Versuchen eintragen.${last ? ` Zuletzt (${fmtShort(last.date)}): links ${sec(last.l)} · rechts ${sec(last.r)}.` : ''}</p>`;
 }
 
 function exHTML(b, s, day) {
@@ -486,7 +506,26 @@ function exHTML(b, s, day) {
   </div>`;
 }
 
-function cardioHTML(b, s) {
+// Watt und Trittfrequenz an Studiogeräten – Fortschritt in Zone 2 = mehr Watt bei gleichem Puls (seit 1.3)
+function lastCardio(date, dev) {
+  for (const d of Object.keys(state.sessions).filter(x => x < date).sort().reverse()) {
+    const c = Object.values(state.sessions[d].cardio || {}).find(x => x.dev === dev && x.watt != null);
+    if (c) return { date: d, ...c };
+  }
+  return null;
+}
+
+function powerHTML(b, c, day) {
+  const last = lastCardio(day.date, c.dev);
+  const parts = last ? [`${deNum(last.watt)} W`, last.rpm != null ? `${last.rpm} rpm` : '', last.hr ? `Puls ${last.hr}` : ''].filter(Boolean).join(' · ') : '';
+  return `<div class="c-row two">
+      <label>Ø-Watt<input data-f="cw" data-k="${b.key}" value="${deNum(c.watt)}" placeholder="opt." inputmode="numeric"></label>
+      <label>Ø-rpm<input data-f="crpm" data-k="${b.key}" value="${deNum(c.rpm)}" placeholder="opt." inputmode="numeric"></label>
+    </div>
+    ${last ? `<p class="hint">Zuletzt ${esc(c.dev)} (${fmtShort(last.date)}): ${esc(parts)}</p>` : ''}`;
+}
+
+function cardioHTML(b, s, day) {
   const c = s.cardio[b.key] || { min: b.min, dev: b.dev[0], hr: '', ok: false };
   const devs = b.dev.includes(c.dev) ? b.dev : [...b.dev, c.dev];
   return `<div class="block cardio ${c.ok ? 'ok' : ''}">
@@ -497,6 +536,7 @@ function cardioHTML(b, s) {
       <label class="grow">Gerät / Aktivität<select data-f="cdev" data-k="${b.key}">${devs.map(d => `<option ${d === c.dev ? 'selected' : ''}>${esc(d)}</option>`).join('')}</select></label>
       <label>Ø-Puls<input data-f="chr" data-k="${b.key}" value="${esc(c.hr)}" placeholder="opt." inputmode="numeric"></label>
     </div>
+    ${b.dev.includes('Ergometer') ? powerHTML(b, c, day) : ''}
     ${b.hint ? `<p class="hint">${esc(b.hint)}</p>` : ''}
   </div>`;
 }
@@ -552,10 +592,10 @@ function sessionHTML(day) {
   }
   h += modeSwitch(day, s);
   for (const b of blocks) {
-    if (b.type === 'check') h += checkHTML(b, s);
+    if (b.type === 'check') h += checkHTML(b, s, day);
     else if (b.type === 'head') h += `<h3 class="block-head">${esc(b.label)}</h3>${b.hint ? `<p class="hint">${esc(b.hint)}</p>` : ''}`;
     else if (b.type === 'ex') h += exHTML(b, s, day);
-    else if (b.type === 'cardio') h += cardioHTML(b, s);
+    else if (b.type === 'cardio') h += cardioHTML(b, s, day);
     else if (b.type === 'intervals') h += intervalsHTML(b, s);
     else if (b.type === 'circuit') h += circuitHTML(s);
   }
@@ -797,7 +837,7 @@ function renderMehr() {
       <li>Intervalle erst nach ärztlicher Freigabe (Belastungs-EKG bis zur Ausbelastung).</li>
       <li>Vorschlag auf Basis deiner Daten, kein ärztlicher Trainingsplan.</li></ul></details>
   </section>
-  <p class="foot muted">Version 1.2 · funktioniert offline · keine Daten verlassen das Gerät, außer du exportierst sie.</p>`;
+  <p class="foot muted">Version 1.3 · funktioniert offline · keine Daten verlassen das Gerät, außer du exportierst sie.</p>`;
   return h;
 }
 
@@ -997,12 +1037,12 @@ function exportCSV() {
     if (!hasProgress(s)) continue;
     const info = dayInfo(state.settings, d);
     const title = info.week ? dayTitle(info, s.mode).title : s.kind;
-    einheiten.push([fmtFull(d), title, info.week ? weekLabel(info.week) : '', STATUS_LABEL[statusOf(d)], s.mode, s.doneOn ? fmtFull(s.doneOn) : '', s.note]);
+    einheiten.push([fmtFull(d), title, info.week ? weekLabel(info.week) : '', STATUS_LABEL[statusOf(d)], s.mode, s.doneOn ? fmtFull(s.doneOn) : '', deNum(s.stand?.l), deNum(s.stand?.r), s.note]);
     for (const [id, sets] of Object.entries(s.ex)) {
       sets.forEach((x, i) => kraft.push([fmtFull(d), title, EX[id].name, i + 1, x.r ?? '', deNum(x.kg || 0), x.ok ? 'ja' : 'nein']));
     }
-    for (const [k, c] of Object.entries(s.cardio)) ausdauer.push([fmtFull(d), title, CARDIO_NAME[k] || k, c.min ?? '', c.dev, c.hr, c.ok ? 'ja' : 'nein']);
-    s.iv.forEach((x, i) => ausdauer.push([fmtFull(d), title, `Intervall ${i + 1}`, '', '', x.hr, x.ok ? 'ja' : 'nein']));
+    for (const [k, c] of Object.entries(s.cardio)) ausdauer.push([fmtFull(d), title, CARDIO_NAME[k] || k, c.min ?? '', c.dev, c.hr, deNum(c.watt), deNum(c.rpm), c.ok ? 'ja' : 'nein']);
+    s.iv.forEach((x, i) => ausdauer.push([fmtFull(d), title, `Intervall ${i + 1}`, '', '', x.hr, '', '', x.ok ? 'ja' : 'nein']));
   }
   for (const d of Object.keys(state.checkins).sort()) {
     const c = state.checkins[d];
@@ -1010,9 +1050,9 @@ function exportCSV() {
   }
   const t = todayISO();
   shareFiles([
-    csvFile(`vo2max-einheiten-${t}.csv`, ['Datum', 'Einheit', 'Planwoche', 'Status', 'Variante', 'Erledigt am', 'Notiz'], einheiten),
+    csvFile(`vo2max-einheiten-${t}.csv`, ['Datum', 'Einheit', 'Planwoche', 'Status', 'Variante', 'Erledigt am', 'Einbeinstand links (s)', 'Einbeinstand rechts (s)', 'Notiz'], einheiten),
     csvFile(`vo2max-kraft-${t}.csv`, ['Datum', 'Einheit', 'Übung', 'Satz', 'Wdh', 'kg', 'erledigt'], kraft),
-    csvFile(`vo2max-ausdauer-${t}.csv`, ['Datum', 'Einheit', 'Block', 'Minuten', 'Gerät', 'Puls', 'erledigt'], ausdauer),
+    csvFile(`vo2max-ausdauer-${t}.csv`, ['Datum', 'Einheit', 'Block', 'Minuten', 'Gerät', 'Puls', 'Watt', 'rpm', 'erledigt'], ausdauer),
     csvFile(`vo2max-ampel-${t}.csv`, ['Datum', 'Ruhepuls Vortag', 'Vitalwerte', 'Befinden', 'Ampel'], ampel),
     haCSV(t),
   ]);
@@ -1169,10 +1209,15 @@ function onField(e) {
       case 'cmin': s.cardio[k].min = num(v); break;
       case 'cdev': s.cardio[k].dev = v; break;
       case 'chr': s.cardio[k].hr = v.trim(); break;
+      case 'cw': s.cardio[k].watt = num(v); break;
+      case 'crpm': s.cardio[k].rpm = num(v); break;
+      case 'standl': s.stand = s.stand || {}; s.stand.l = num(v); break;
+      case 'standr': s.stand = s.stand || {}; s.stand.r = num(v); break;
       case 'ivhr': s.iv[i].hr = v.trim(); break;
       case 'note': s.note = v; break;
     }
     save();
+    if (t.dataset.f === 'cdev' && e.type === 'change') render();
     return;
   }
   if (t.dataset.draft === 'rhr') {
