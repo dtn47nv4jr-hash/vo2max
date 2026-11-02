@@ -88,7 +88,11 @@ const HA_ONSET = [['sleep', 'Hat mich geweckt'], ['wake', 'Beim Aufwachen'], ['d
 const HA_LOC = [['stirn', 'Stirn'], ['schlaefe', 'Schläfe'], ['auge', 'Hinter dem Auge'], ['scheitel', 'Scheitel'], ['hinterkopf', 'Hinterkopf / Nacken'], ['ganz', 'Ganzer Kopf']];
 const HA_SIDE = [['links', 'Links'], ['rechts', 'Rechts'], ['beide', 'Beidseitig']];
 const HA_KIND = [['drueckend', 'Drückend / dumpf'], ['pochend', 'Pochend / pulsierend'], ['stechend', 'Stechend']];
-const HA_SYM = [['uebelkeit', 'Übelkeit'], ['licht', 'Lichtempfindlich'], ['laerm', 'Lärmempfindlich'], ['seh', 'Sehstörung / Flimmern'], ['schwindel', 'Schwindel'], ['nacken', 'Nackenschmerz'], ['kauen', 'Schmerz beim Kauen']];
+const HA_SYM = [['uebelkeit', 'Übelkeit'], ['licht', 'Lichtempfindlich'], ['laerm', 'Lärmempfindlich'], ['seh', 'Sehstörung / Flimmern'], ['schwindel', 'Schwindel'], ['nacken', 'Nackenschmerz'], ['kiefer', 'Kiefer verspannt / Zähneknirschen'], ['kauen', 'Schmerz beim Kauen']];
+// Seit 1.4: Nackenverspannung (Joe: Kopfschmerz immer mit verspanntem Nacken links) und Schlafposition
+const HA_NECK = [['nein', 'Nein'], ['links', 'Links'], ['rechts', 'Rechts'], ['beide', 'Beidseitig']];
+const HA_POS = [['ruecken', 'Rücken'], ['seite_l', 'Seite links'], ['seite_r', 'Seite rechts'], ['bauch', 'Bauch'], ['wechselnd', 'Wechselnd / unbekannt']];
+const KIND_NAME = { krafta: 'Kraft A', kraftb: 'Kraft B', sunday: 'Studio (So)', z2out: 'Zone 2 draußen', walk: 'Alltag', opt: 'Optional', free: 'Frei' };
 const HA_PRIOR = [['essen', 'Spätes / schweres Essen'], ['wenig', 'Wenig getrunken'], ['stress', 'Stress'], ['schnarchen', 'Schnarchen / Atemaussetzer bemerkt']];
 const HA_EFFECT = ['gut', 'teilweise', 'keine'];
 const MED_NAMES = ['Ibuprofen', 'Paracetamol', 'Aspirin (ASS)', 'Thomapyrin', 'Novaminsulfon'];
@@ -104,6 +108,14 @@ const hasMeds = e => e.meds.some(m => m.name.trim());
 const monthName = ym => new Date(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)) - 1, 1).toLocaleDateString('de-DE', { month: 'long', year: 'numeric' });
 const avgText = s => (s.avg == null ? '–' : deNum(s.avg.toFixed(1)));
 const plural = (n, one, many) => `${deNum(n)} ${n === 1 ? one : many}`;
+// Training am Vortag aus dem eigenen Protokoll (nur was in der App erfasst ist)
+function prevTraining(date) {
+  const s = state.sessions[addDays(date, -1)];
+  if (!s || !hasProgress(s)) return null;
+  const ex = Object.entries(s.ex).filter(([, a]) => a.some(x => x.ok)).map(([id]) => EX[id]?.name || id);
+  return { label: KIND_NAME[s.kind] || s.kind, ex, kraft: ex.length > 0 };
+}
+const prevText = t => (t ? `${t.label}${t.ex.length ? ` (${t.ex.join(', ')})` : ' – ohne Kraftübungen'}` : 'kein Training erfasst');
 const medText = m => [m.name.trim(), m.dose.trim(), m.time && `um ${m.time}`].filter(Boolean).join(' ') + (m.effect ? `, Wirkung ${m.effect}` : '');
 
 function haMax(date) {
@@ -123,7 +135,7 @@ function dayLight(date) {
 function newHeadache() {
   const e = {
     id: 'h' + Date.now().toString(36), date: todayISO(), time: nowTime(), onset: new Date().getHours() < 10 ? 'wake' : 'day', end: '', pain: null,
-    loc: [], side: '', kind: [], sym: [], alc: null, coffee: null, sleep: null, prior: [], meds: [], note: '',
+    loc: [], side: '', neck: '', kind: [], sym: [], pos: '', alc: null, coffee: null, sleep: null, prior: [], meds: [], note: '',
   };
   state.headaches.push(e);
   save();
@@ -135,7 +147,7 @@ function editHeadache(act, t) {
   if (!e) return;
   const k = t.dataset.k, v = t.dataset.v, i = Number(t.dataset.i);
   switch (act) {
-    case 'ha-set': e[k] = k === 'pain' ? Number(v) : (k === 'side' && e[k] === v ? '' : v); break;
+    case 'ha-set': e[k] = k === 'pain' ? Number(v) : (['side', 'neck', 'pos'].includes(k) && e[k] === v ? '' : v); break;
     case 'ha-tog': e[k] = e[k].includes(v) ? e[k].filter(x => x !== v) : [...e[k], v]; break;
     case 'ha-med-add': e.meds.push({ name: '', dose: '', time: nowTime(), effect: '' }); break;
     case 'ha-med-del': e.meds.splice(i, 1); break;
@@ -233,6 +245,8 @@ function renderKopfEdit() {
   if (!e) { route.tab = 'kopf'; return renderKopf(); }
   const on = (key, k) => (Array.isArray(e[key]) ? e[key].includes(k) : String(e[key]) === String(k));
   const chips = (key, list) => `<div class="chips">${list.map(([k, l]) => `<button data-act="ha-tog" data-k="${key}" data-v="${k}" class="chip ${on(key, k) ? 'on' : ''}" aria-pressed="${on(key, k)}">${l}</button>`).join('')}</div>`;
+  // Einfachauswahl im Chip-Layout (für längere Listen, seit 1.4)
+  const pick = (key, list) => `<div class="chips">${list.map(([k, l]) => `<button data-act="ha-set" data-k="${key}" data-v="${k}" class="chip ${on(key, k) ? 'on' : ''}" aria-pressed="${on(key, k)}">${l}</button>`).join('')}</div>`;
   const seg = (key, list, cls = '') => `<div class="seg ${cls}">${list.map(([k, l]) => `<button data-act="ha-set" data-k="${key}" data-v="${k}" class="${on(key, k) ? 'on' : ''}" aria-pressed="${on(key, k)}">${l}</button>`).join('')}</div>`;
   const names = [...new Set([...MED_NAMES, ...state.headaches.flatMap(x => x.meds.map(m => m.name.trim())).filter(Boolean)])];
   const meds = e.meds.map((m, i) => `<div class="med">
@@ -265,6 +279,7 @@ function renderKopfEdit() {
   <section class="card"><h2>Ort und Art</h2>
     <div class="label">Wo</div>${chips('loc', HA_LOC)}
     <div class="label">Seite</div>${seg('side', HA_SIDE)}
+    <div class="label">Nacken verspannt</div>${seg('neck', HA_NECK)}
     <div class="label">Wie</div>${chips('kind', HA_KIND)}
   </section>
   <section class="card"><h2>Begleitsymptome</h2>${chips('sym', HA_SYM)}
@@ -278,8 +293,10 @@ function renderKopfEdit() {
     </div>
     <p class="hint">Schlafdauer z. B. aus der Health-App (Schlaf).</p>
     ${chips('prior', HA_PRIOR)}
+    <div class="label">Schlafposition (soweit bekannt)</div>${pick('pos', HA_POS)}
+    <p class="hint">Training am Vortag (aus dem Protokoll): ${esc(prevText(prevTraining(e.date)))}</p>
   </section>
-  <section class="card"><label class="note">Notiz<textarea data-h="note" rows="3" placeholder="z. B. besser nach dem Frühstück, Nacken verspannt">${esc(e.note)}</textarea></label>
+  <section class="card"><label class="note">Notiz<textarea data-h="note" rows="3" placeholder="z. B. besser nach dem Frühstück, Kissen gewechselt">${esc(e.note)}</textarea></label>
     <div class="actions"><button class="primary" data-act="ha-done">Fertig</button><button class="ghost" data-act="ha-del">Löschen</button></div>
   </section>
   <details class="card fold"><summary>Warnzeichen – sofort ärztliche Hilfe</summary><ul class="plain">
@@ -320,6 +337,14 @@ function haReport() {
     const c = count(key, names);
     if (c) L.push(`${label}: ${c}`);
   }
+  for (const [key, names, label] of [['neck', HA_NECK, 'Nacken verspannt'], ['pos', HA_POS, 'Schlafposition']]) {
+    const c = {};
+    for (const e of list) if (e[key]) c[e[key]] = (c[e[key]] || 0) + 1;
+    const t = Object.entries(c).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${nameOf(names, k)} ${n}×`).join(', ');
+    if (t) L.push(`${label}: ${t} (von ${s.n} Einträgen)`);
+  }
+  const kv = list.filter(e => prevTraining(e.date)?.kraft).length;
+  L.push(`Krafttraining am Vortag: ${kv} von ${s.n} Einträgen (laut Trainingsprotokoll der App)`);
   for (const [ym] of haByMonth().reverse()) {
     const m = haStats(haMonth(ym));
     L.push(`${monthName(ym)}: ${plural(m.days, 'Kopfschmerztag', 'Kopfschmerztage')}, ${plural(m.medDays, 'Schmerzmitteltag', 'Schmerzmitteltage')}${m.avg != null ? `, Ø Stärke ${avgText(m)}` : ''}`);
@@ -331,12 +356,15 @@ function haReport() {
     L.push('', `${day}, ${e.time || '–'} Uhr (${nameOf(HA_ONSET, e.onset)})${e.end ? `, bis ${e.end} Uhr${dur ? ` (${dur})` : ''}` : ''} · Stärke ${e.pain ?? '–'}/10`);
     const where = [e.loc.map(k => nameOf(HA_LOC, k)).join(', '), e.side && nameOf(HA_SIDE, e.side), e.kind.map(k => nameOf(HA_KIND, k)).join(', ')].filter(Boolean).join(' · ');
     if (where) L.push(`  ${where}`);
+    if (e.neck) L.push(`  Nacken verspannt: ${nameOf(HA_NECK, e.neck)}`);
     if (e.sym.length) L.push(`  Begleitsymptome: ${e.sym.map(k => nameOf(HA_SYM, k)).join(', ')}`);
     const em = e.meds.filter(m => m.name.trim());
     L.push(`  Schmerzmittel: ${em.length ? em.map(medText).join('; ') : 'keine'}`);
     const prior = [e.alc != null && `Alkohol ${plural(e.alc, 'Glas', 'Gläser')}`, e.coffee != null && `Kaffee am Vortag ${plural(e.coffee, 'Tasse', 'Tassen')}`,
       e.sleep != null && `Schlaf ${deNum(e.sleep)} h`, ...e.prior.map(k => nameOf(HA_PRIOR, k))].filter(Boolean);
     if (prior.length) L.push(`  Vorabend/Nacht: ${prior.join(' · ')}`);
+    if (e.pos) L.push(`  Schlafposition: ${nameOf(HA_POS, e.pos)}`);
+    L.push(`  Training am Vortag: ${prevText(prevTraining(e.date))}`);
     if (e.note.trim()) L.push(`  Notiz: ${e.note.trim()}`);
   }
   L.push('', 'Selbst erfasst; Stärke nach eigener Einschätzung (1 = kaum spürbar, 10 = stärkster vorstellbarer Schmerz).');
@@ -360,9 +388,10 @@ function haCSV(t) {
     e.loc.map(k => nameOf(HA_LOC, k)).join(', '), e.side ? nameOf(HA_SIDE, e.side) : '', e.kind.map(k => nameOf(HA_KIND, k)).join(', '),
     e.sym.map(k => nameOf(HA_SYM, k)).join(', '), e.meds.filter(m => m.name.trim()).map(medText).join(' / '),
     deNum(e.alc), deNum(e.coffee), deNum(e.sleep), e.prior.map(k => nameOf(HA_PRIOR, k)).join(', '), e.note,
+    e.neck ? nameOf(HA_NECK, e.neck) : '', e.pos ? nameOf(HA_POS, e.pos) : '', prevText(prevTraining(e.date)),
   ]);
   return csvFile(`vo2max-kopfschmerz-${t}.csv`, ['Datum', 'Beginn', 'Zeitpunkt', 'Ende', 'Dauer', 'Stärke', 'Ort', 'Seite', 'Art', 'Begleitsymptome', 'Schmerzmittel',
-    'Alkohol (Gläser)', 'Kaffee Vortag (Tassen)', 'Schlaf (h)', 'Vorabend/Nacht', 'Notiz'], rows);
+    'Alkohol (Gläser)', 'Kaffee Vortag (Tassen)', 'Schlaf (h)', 'Vorabend/Nacht', 'Notiz', 'Nacken verspannt', 'Schlafposition', 'Training Vortag'], rows);
 }
 
 // ---------- Einheiten ----------
@@ -837,7 +866,7 @@ function renderMehr() {
       <li>Intervalle erst nach ärztlicher Freigabe (Belastungs-EKG bis zur Ausbelastung).</li>
       <li>Vorschlag auf Basis deiner Daten, kein ärztlicher Trainingsplan.</li></ul></details>
   </section>
-  <p class="foot muted">Version 1.3 · funktioniert offline · keine Daten verlassen das Gerät, außer du exportierst sie.</p>`;
+  <p class="foot muted">Version 1.4 · funktioniert offline · keine Daten verlassen das Gerät, außer du exportierst sie.</p>`;
   return h;
 }
 
