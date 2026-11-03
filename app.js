@@ -827,7 +827,7 @@ function renderMehr() {
   </section>`;
   h += `<section class="card"><h2>Pausen-Timer</h2>
     <label class="field">Satzpause<select data-set="pause">${PAUSES.map(p => `<option value="${p}" ${p === pauseLength() ? 'selected' : ''}>${p ? `${p} Sekunden` : 'Aus'}</option>`).join('')}</select></label>
-    <p class="hint">Startet, sobald du einen Satz abhakst; Antippen beendet die Pause. Beim einarmigen Rudern erst nach beiden Seiten. Am Ende Ton und Aufblinken, solange die App offen ist – bei stummgeschaltetem iPhone nur das Blinken. Während der Pause bleibt der Bildschirm an.</p>
+    <p class="hint">Startet, sobald du einen Satz abhakst; Antippen beendet die Pause. Beim einarmigen Rudern erst nach beiden Seiten. Die letzten 3 Sekunden zählt ein Piepton herunter, am Ende ein langer Ton und 3 Sekunden Blinken – solange die App offen ist. Die Lautstärke regeln die Lautstärketasten. Während der Pause bleibt der Bildschirm an.</p>
   </section>`;
   h += `<section class="card"><h2>Ärztliche Freigabe</h2>
     <label class="switch"><input type="checkbox" data-set="freigabeOn" ${st.freigabe ? 'checked' : ''}><span>Freigabe für Intervalle erhalten</span></label>
@@ -866,7 +866,7 @@ function renderMehr() {
       <li>Intervalle erst nach ärztlicher Freigabe (Belastungs-EKG bis zur Ausbelastung).</li>
       <li>Vorschlag auf Basis deiner Daten, kein ärztlicher Trainingsplan.</li></ul></details>
   </section>
-  <p class="foot muted">Version 1.4 · funktioniert offline · keine Daten verlassen das Gerät, außer du exportierst sie.</p>`;
+  <p class="foot muted">Version 1.5 · funktioniert offline · keine Daten verlassen das Gerät, außer du exportierst sie.</p>`;
   return h;
 }
 
@@ -901,8 +901,9 @@ function toast(msg) {
 // Zählt gegen die Uhrzeit, damit die Restzeit nach einem App-Wechsel stimmt.
 // Ton gibt es nur bei offener App: iOS hält Web-Apps im Hintergrund an.
 const PAUSES = [0, 60, 90, 120];   // 0 = aus
+const CUES = [3000, 2000, 1000, 0]; // Töne bei 3, 2, 1 s Restzeit und am Ende
 const pauseLength = () => state.settings.pause ?? 90;
-let pause = null;                  // { key, end, total, done }
+let pause = null;                  // { key, end, total, done, cues, out }
 let pauseTick = null, pauseHide = null, audio = null, wakeLock = null;
 
 // Was nach der Pause kommt; null = keine Pause (Seitenwechsel oder alles geschafft)
@@ -919,28 +920,66 @@ function nextUp(s, day, id, i) {
   return next ? `Als Nächstes: ${EX[next].name}` : null;
 }
 
-// iOS gibt Ton nur frei, wenn er bei einem Tipp vorbereitet wurde
+// iOS gibt Ton nur frei, wenn er bei einem Tipp vorbereitet wurde. War der Bildschirm
+// zwischendurch aus, hält iOS den alten Audio-Kontext an – dann bei jedem Tipp neu anlegen.
 function unlockAudio() {
   try {
+    // Als Wiedergabe angemeldet: Ton auch bei stummgeschaltetem iPhone, mit Medienlautstärke
+    if (navigator.audioSession) navigator.audioSession.type = 'playback';
+    if (audio && audio.state !== 'running') { audio.close?.().catch(() => {}); audio = null; }
     audio = audio || new (window.AudioContext || window.webkitAudioContext)();
     if (audio.state !== 'running') audio.resume();
+    const b = audio.createBufferSource();   // stiller Puffer schaltet den Ton sicher frei
+    b.buffer = audio.createBuffer(1, 1, 22050);
+    b.connect(audio.destination);
+    b.start(0);
   } catch (e) { audio = null; }
 }
 
-function beep() {
-  if (!audio) return;
+// Nach der Pause den Ton wieder abgeben, damit die App andere Wiedergaben nicht blockiert
+function releaseAudio() {
+  setTimeout(() => { if (audio && audio.state === 'running' && (!pause || pause.done)) audio.suspend(); }, 1500);
+}
+
+// Kräftiger Piepton als Rechteckwelle; at = Startzeit auf der Audio-Uhr
+function tone(at, freq, len) {
+  if (!audio || !pause?.out) return;
+  const o = audio.createOscillator(), g = audio.createGain();
+  o.type = 'square';
+  o.frequency.value = freq;
+  g.gain.setValueAtTime(0, at);
+  g.gain.linearRampToValueAtTime(0.9, at + 0.005);
+  g.gain.setValueAtTime(0.9, at + len - 0.02);
+  g.gain.linearRampToValueAtTime(0, at + len);
+  o.connect(g).connect(pause.out);
+  o.start(at);
+  o.stop(at + len + 0.01);
+}
+
+// Plant fällige Töne punktgenau ein; verpasste (App war im Hintergrund) entfallen
+function scheduleCues(left) {
+  if (!audio || !pause.out) return;
   if (audio.state !== 'running') audio.resume();
-  const t0 = audio.currentTime + 0.05;
-  [0, 0.3, 0.6].forEach((d, k) => {
-    const o = audio.createOscillator(), g = audio.createGain();
-    o.frequency.value = k === 2 ? 1175 : 880;
-    g.gain.setValueAtTime(0.0001, t0 + d);
-    g.gain.exponentialRampToValueAtTime(0.6, t0 + d + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + d + 0.24);
-    o.connect(g).connect(audio.destination);
-    o.start(t0 + d);
-    o.stop(t0 + d + 0.26);
-  });
+  for (const m of CUES) {
+    if (pause.cues.has(m) || left > m + 400) continue;
+    pause.cues.add(m);
+    if (left < m - 150) continue;
+    const at = audio.currentTime + Math.max(0, left - m) / 1000;
+    if (m) tone(at, 1320, 0.15); else tone(at, 1760, 0.7);
+  }
+}
+
+function flashScreen() {
+  let el = document.getElementById('flash');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'flash';
+    el.addEventListener('animationend', () => el.classList.remove('on'));
+    document.body.appendChild(el);
+  }
+  el.classList.remove('on');
+  void el.offsetWidth;   // Animation neu starten
+  el.classList.add('on');
 }
 
 async function keepAwake(on) {
@@ -975,7 +1014,9 @@ function startPause(key, label) {
   if (!total) return;
   clearInterval(pauseTick);
   clearTimeout(pauseHide);
-  pause = { key, end: Date.now() + total * 1000, total, done: false };
+  pause?.out?.disconnect();
+  pause = { key, end: Date.now() + total * 1000, total, done: false, cues: new Set(), out: null };
+  if (audio) { pause.out = audio.createGain(); pause.out.connect(audio.destination); }
   const el = pauseBar();
   el.classList.remove('done');
   el.innerHTML = `<span class="p-fill"></span><span class="p-label">Pause · ${esc(label)}</span><b class="p-time"></b><span class="p-stop">Stopp</span>`;
@@ -990,6 +1031,7 @@ function startPause(key, label) {
 function updatePause() {
   if (!pause || pause.done) return;
   const left = Math.max(0, pause.end - Date.now());
+  scheduleCues(left);
   if (left === 0) {
     // Erst lange nach dem Ende zurück in der App: kein verspäteter Alarm mehr
     if (Date.now() - pause.end > 60000) stopPause(); else finishPause();
@@ -1004,7 +1046,8 @@ function finishPause() {
   pause.done = true;
   clearInterval(pauseTick);
   keepAwake(false);
-  beep();
+  flashScreen();
+  releaseAudio();
   const el = pauseBar();
   el.classList.add('done');
   el.querySelector('.p-label').textContent = 'Pause vorbei';
@@ -1017,8 +1060,11 @@ function finishPause() {
 function stopPause() {
   clearInterval(pauseTick);
   clearTimeout(pauseHide);
+  pause?.out?.disconnect();
   pause = null;
   keepAwake(false);
+  releaseAudio();
+  document.getElementById('flash')?.classList.remove('on');
   document.getElementById('pause')?.classList.remove('show', 'done');
   document.body.classList.remove('pausing');
 }
