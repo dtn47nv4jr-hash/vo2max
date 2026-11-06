@@ -44,6 +44,8 @@ const DEV_STUDIO = ['Ergometer', 'Rudergerät', 'Crosstrainer'];
 const DEV_OUT = ['Rad outdoor', 'Gehen outdoor', 'Schwimmen', 'Nordic Walking', 'Lauf-Geh-Wechsel'];
 // Trittfrequenz-Hinweis für das Ergometer (Trainingsbewertung, „Ausdauereinheiten im Detail“) – seit 1.3
 const CADENCE = ' Ergometer: Trittfrequenz 80–90/min, niedrige Stufe – nach Puls steuern, nicht nach Watt.';
+// Rudergerät-Hinweis (Auswertung 06.11.2026: am 05.11. ~49–51 W bei 20–21 Schlägen/min → Puls 129–133) – seit 1.6
+const ROWING = ' Rudergerät: 18–22 Schläge/min gleichmäßig, Start mit 40–45 W (≈ 3:20/500 m), Widerstandsstufe immer gleich. Erste 3–5 min ganz locker, dann nach Puls ±5 W nachjustieren.';
 
 const BALANCE = [
   'Einbeinstand 3 × 30 s je Bein (Steigerung: Augen zu, Kopf langsam drehen, weiche Matte)',
@@ -166,7 +168,7 @@ function blocksFor(day, mode = 'normal') {
       const a = day.kind === 'krafta';
       const k = a ? KRAFT_A : KRAFT_B;
       return [
-        { type: 'check', key: 'warmup', label: 'Aufwärmen', detail: a ? '8 min Ergometer locker' : '8 min Rudergerät oder Crosstrainer locker' },
+        { type: 'check', key: 'warmup', label: 'Aufwärmen', detail: a ? '8 min Ergometer locker' : '8 min Rudergerät oder Crosstrainer locker (Rudergerät ca. 35 W, Puls unter 120)' },
         balance,
         { type: 'head', label: a ? 'Kraft A · App-Vorlage' : 'Kraft B · App-Vorlage', hint: kraftHint(w) },
         ...strength(k.app),
@@ -174,7 +176,7 @@ function blocksFor(day, mode = 'normal') {
         ...strength(k.extra),
         { type: 'cardio', key: 'anhang', label: 'Zone 2 · Ausdauer-Anhang', min: w.anhang,
           dev: a ? DEV_STUDIO : ['Rudergerät', 'Crosstrainer', 'Ergometer'],
-          hint: 'Bewusst locker: Puls ~115–130, ganze Sätze sprechen. Erst Kraft, dann Ausdauer.' + CADENCE },
+          hint: 'Bewusst locker: Puls ~115–130, ganze Sätze sprechen. Erst Kraft, dann Ausdauer.', z2: true },
       ];
     }
     case 'z2out':
@@ -197,7 +199,7 @@ function blocksFor(day, mode = 'normal') {
       }
       return [
         { type: 'cardio', key: 'so', label: 'Zone 2 · Studio', min: sundayMinutes(w), dev: DEV_STUDIO,
-          hint: 'Erste 5 min ganz locker, dann gleichmäßig ~115–130. Geräte gern abwechseln.' + CADENCE },
+          hint: 'Erste 5 min ganz locker, dann gleichmäßig ~115–130. Geräte gern abwechseln.', z2: true },
         balance, yoga,
       ];
     }

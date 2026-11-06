@@ -536,6 +536,35 @@ function exHTML(b, s, day) {
 }
 
 // Watt und Trittfrequenz an Studiogeräten – Fortschritt in Zone 2 = mehr Watt bei gleichem Puls (seit 1.3)
+// Seit 1.6: Stufe an allen Studiogeräten; Rudergerät mit Zeit, Strecke und Schlägen vom Endbildschirm,
+// daraus Ø /500 m, Ø-Watt (Formel Watt = 2,80 / (s pro m)³) und Ø-Schlagzahl.
+const DEV_HINT = { 'Ergometer': CADENCE, 'Rudergerät': ROWING };
+
+function parseMMSS(v) {
+  const t = String(v ?? '').trim();
+  if (!t) return null;
+  const m = t.match(/^(\d{1,3})[:.](\d{1,2})$/);
+  if (m) return Number(m[1]) * 60 + Number(m[2]);
+  const n = num(t);
+  return n && n > 0 ? Math.round(n * 60) : null;
+}
+const fmtMMSS = sec => (sec == null ? '' : `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, '0')}`);
+
+function rowCalc(c) {
+  if (!c.tsec || !c.dist) return null;
+  const sPerM = c.tsec / c.dist;
+  return {
+    split: sPerM * 500,
+    watt: Math.round(2.8 / Math.pow(sPerM, 3)),
+    spm: c.strokes ? Math.round(c.strokes / (c.tsec / 60) * 10) / 10 : null,
+  };
+}
+function rowCalcText(c) {
+  const r = rowCalc(c);
+  if (!r) return 'Zeit und Strecke eintragen – dann rechnet die App Ø /500 m, Ø-Watt und Ø-Schlagzahl aus.';
+  return `Berechnet: Ø ${fmtMMSS(r.split)} /500 m · ${r.watt} W${r.spm != null ? ` · ${deNum(r.spm)} Schläge/min` : ''}`;
+}
+
 function lastCardio(date, dev) {
   for (const d of Object.keys(state.sessions).filter(x => x < date).sort().reverse()) {
     const c = Object.values(state.sessions[d].cardio || {}).find(x => x.dev === dev && x.watt != null);
@@ -545,11 +574,26 @@ function lastCardio(date, dev) {
 }
 
 function powerHTML(b, c, day) {
+  const row = c.dev === 'Rudergerät';
   const last = lastCardio(day.date, c.dev);
-  const parts = last ? [`${deNum(last.watt)} W`, last.rpm != null ? `${last.rpm} rpm` : '', last.hr ? `Puls ${last.hr}` : ''].filter(Boolean).join(' · ') : '';
-  return `<div class="c-row two">
+  const r = last && row ? rowCalc(last) : null;
+  const parts = last ? [
+    `${deNum(last.watt)} W`,
+    last.rpm != null ? `${deNum(last.rpm)} ${row ? 'Schläge/min' : 'rpm'}` : '',
+    r ? `${fmtMMSS(r.split)} /500 m` : '',
+    last.lvl ? `Stufe ${last.lvl}` : '',
+    last.hr ? `Puls ${last.hr}` : '',
+  ].filter(Boolean).join(' · ') : '';
+  const rowFields = row ? `<div class="c-row three">
+      <label>Zeit (min:s)<input data-f="ct" data-k="${b.key}" value="${fmtMMSS(c.tsec)}" placeholder="min:s" inputmode="decimal"></label>
+      <label>Strecke (m)<input data-f="cdist" data-k="${b.key}" value="${deNum(c.dist)}" placeholder="opt." inputmode="numeric"></label>
+      <label>Schläge<input data-f="cstr" data-k="${b.key}" value="${deNum(c.strokes)}" placeholder="opt." inputmode="numeric"></label>
+    </div>
+    <p class="hint calc" data-out="row-${b.key}">${esc(rowCalcText(c))}</p>` : '';
+  return `${rowFields}<div class="c-row three">
       <label>Ø-Watt<input data-f="cw" data-k="${b.key}" value="${deNum(c.watt)}" placeholder="opt." inputmode="numeric"></label>
-      <label>Ø-rpm<input data-f="crpm" data-k="${b.key}" value="${deNum(c.rpm)}" placeholder="opt." inputmode="numeric"></label>
+      <label>${row ? 'Schläge/min' : 'Ø-rpm'}<input data-f="crpm" data-k="${b.key}" value="${deNum(c.rpm)}" placeholder="opt." inputmode="decimal"></label>
+      <label>Stufe<input data-f="clvl" data-k="${b.key}" value="${esc(c.lvl ?? '')}" placeholder="opt." inputmode="decimal"></label>
     </div>
     ${last ? `<p class="hint">Zuletzt ${esc(c.dev)} (${fmtShort(last.date)}): ${esc(parts)}</p>` : ''}`;
 }
@@ -566,7 +610,7 @@ function cardioHTML(b, s, day) {
       <label>Ø-Puls<input data-f="chr" data-k="${b.key}" value="${esc(c.hr)}" placeholder="opt." inputmode="numeric"></label>
     </div>
     ${b.dev.includes('Ergometer') ? powerHTML(b, c, day) : ''}
-    ${b.hint ? `<p class="hint">${esc(b.hint)}</p>` : ''}
+    ${b.hint ? `<p class="hint">${esc(b.hint + (b.z2 && b.dev.includes('Ergometer') ? (DEV_HINT[c.dev] || '') : ''))}</p>` : ''}
   </div>`;
 }
 
@@ -866,7 +910,7 @@ function renderMehr() {
       <li>Intervalle erst nach ärztlicher Freigabe (Belastungs-EKG bis zur Ausbelastung).</li>
       <li>Vorschlag auf Basis deiner Daten, kein ärztlicher Trainingsplan.</li></ul></details>
   </section>
-  <p class="foot muted">Version 1.5 · funktioniert offline · keine Daten verlassen das Gerät, außer du exportierst sie.</p>`;
+  <p class="foot muted">Version 1.6 · funktioniert offline · keine Daten verlassen das Gerät, außer du exportierst sie.</p>`;
   return h;
 }
 
@@ -1116,7 +1160,7 @@ function exportCSV() {
     for (const [id, sets] of Object.entries(s.ex)) {
       sets.forEach((x, i) => kraft.push([fmtFull(d), title, EX[id].name, i + 1, x.r ?? '', deNum(x.kg || 0), x.ok ? 'ja' : 'nein']));
     }
-    for (const [k, c] of Object.entries(s.cardio)) ausdauer.push([fmtFull(d), title, CARDIO_NAME[k] || k, c.min ?? '', c.dev, c.hr, deNum(c.watt), deNum(c.rpm), c.ok ? 'ja' : 'nein']);
+    for (const [k, c] of Object.entries(s.cardio)) { const r = rowCalc(c); ausdauer.push([fmtFull(d), title, CARDIO_NAME[k] || k, c.min ?? '', c.dev, c.hr, deNum(c.watt), deNum(c.rpm), c.ok ? 'ja' : 'nein', c.lvl ?? '', fmtMMSS(c.tsec), deNum(c.dist), deNum(c.strokes), r ? fmtMMSS(r.split) : '']); }
     s.iv.forEach((x, i) => ausdauer.push([fmtFull(d), title, `Intervall ${i + 1}`, '', '', x.hr, '', '', x.ok ? 'ja' : 'nein']));
   }
   for (const d of Object.keys(state.checkins).sort()) {
@@ -1127,7 +1171,7 @@ function exportCSV() {
   shareFiles([
     csvFile(`vo2max-einheiten-${t}.csv`, ['Datum', 'Einheit', 'Planwoche', 'Status', 'Variante', 'Erledigt am', 'Einbeinstand links (s)', 'Einbeinstand rechts (s)', 'Notiz'], einheiten),
     csvFile(`vo2max-kraft-${t}.csv`, ['Datum', 'Einheit', 'Übung', 'Satz', 'Wdh', 'kg', 'erledigt'], kraft),
-    csvFile(`vo2max-ausdauer-${t}.csv`, ['Datum', 'Einheit', 'Block', 'Minuten', 'Gerät', 'Puls', 'Watt', 'rpm', 'erledigt'], ausdauer),
+    csvFile(`vo2max-ausdauer-${t}.csv`, ['Datum', 'Einheit', 'Block', 'Minuten', 'Gerät', 'Puls', 'Watt', 'rpm / Schläge pro min', 'erledigt', 'Stufe', 'Zeit Gerät (min:s)', 'Strecke (m)', 'Schläge', 'Ø /500 m'], ausdauer),
     csvFile(`vo2max-ampel-${t}.csv`, ['Datum', 'Ruhepuls Vortag', 'Vitalwerte', 'Befinden', 'Ampel'], ampel),
     haCSV(t),
   ]);
@@ -1260,6 +1304,21 @@ view.addEventListener('click', e => {
   }
 });
 
+// Rudergerät: berechnete Werte in Watt- und Schlagzahl-Feld übernehmen, ohne neu zu zeichnen (Fokus bleibt) – seit 1.6
+function rowUpdate(c, k, el) {
+  const box = el.closest('.cardio');
+  const r = rowCalc(c);
+  if (r) {
+    c.watt = r.watt;
+    if (r.spm != null) c.rpm = r.spm;
+    const w = box?.querySelector('[data-f="cw"]'), p = box?.querySelector('[data-f="crpm"]');
+    if (w) w.value = deNum(c.watt);
+    if (p && r.spm != null) p.value = deNum(c.rpm);
+  }
+  const out = box?.querySelector(`[data-out="row-${k}"]`);
+  if (out) out.textContent = rowCalcText(c);
+}
+
 function onField(e) {
   const t = e.target;
   if (t.dataset.h || t.dataset.hm) {
@@ -1286,6 +1345,10 @@ function onField(e) {
       case 'chr': s.cardio[k].hr = v.trim(); break;
       case 'cw': s.cardio[k].watt = num(v); break;
       case 'crpm': s.cardio[k].rpm = num(v); break;
+      case 'clvl': s.cardio[k].lvl = v.trim(); break;
+      case 'ct': s.cardio[k].tsec = parseMMSS(v); rowUpdate(s.cardio[k], k, t); break;
+      case 'cdist': s.cardio[k].dist = num(v); rowUpdate(s.cardio[k], k, t); break;
+      case 'cstr': s.cardio[k].strokes = num(v); rowUpdate(s.cardio[k], k, t); break;
       case 'standl': s.stand = s.stand || {}; s.stand.l = num(v); break;
       case 'standr': s.stand = s.stand || {}; s.stand.r = num(v); break;
       case 'ivhr': s.iv[i].hr = v.trim(); break;
