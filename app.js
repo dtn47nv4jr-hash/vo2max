@@ -584,8 +584,9 @@ function powerHTML(b, c, day) {
     last.lvl ? `Stufe ${last.lvl}` : '',
     last.hr ? `Puls ${last.hr}` : '',
   ].filter(Boolean).join(' · ') : '';
-  const rowFields = row ? `<div class="c-row three">
-      <label>Zeit (min:s)<input data-f="ct" data-k="${b.key}" value="${fmtMMSS(c.tsec)}" placeholder="min:s" inputmode="decimal"></label>
+  const rowFields = row ? `<div class="c-row four">
+      <label>Min<input data-f="ctm" data-k="${b.key}" value="${c.tsec != null ? Math.floor(c.tsec / 60) : ''}" placeholder="opt." inputmode="numeric"></label>
+      <label>Sek<input data-f="cts" data-k="${b.key}" value="${c.tsec != null ? Math.round(c.tsec % 60) : ''}" placeholder="opt." inputmode="numeric"></label>
       <label>Strecke (m)<input data-f="cdist" data-k="${b.key}" value="${deNum(c.dist)}" placeholder="opt." inputmode="numeric"></label>
       <label>Schläge<input data-f="cstr" data-k="${b.key}" value="${deNum(c.strokes)}" placeholder="opt." inputmode="numeric"></label>
     </div>
@@ -910,7 +911,7 @@ function renderMehr() {
       <li>Intervalle erst nach ärztlicher Freigabe (Belastungs-EKG bis zur Ausbelastung).</li>
       <li>Vorschlag auf Basis deiner Daten, kein ärztlicher Trainingsplan.</li></ul></details>
   </section>
-  <p class="foot muted">Version 1.6 · funktioniert offline · keine Daten verlassen das Gerät, außer du exportierst sie.</p>`;
+  <p class="foot muted">Version 1.6.1 · funktioniert offline · keine Daten verlassen das Gerät, außer du exportierst sie.</p>`;
   return h;
 }
 
@@ -1346,7 +1347,13 @@ function onField(e) {
       case 'cw': s.cardio[k].watt = num(v); break;
       case 'crpm': s.cardio[k].rpm = num(v); break;
       case 'clvl': s.cardio[k].lvl = v.trim(); break;
-      case 'ct': s.cardio[k].tsec = parseMMSS(v); rowUpdate(s.cardio[k], k, t); break;
+      case 'ctm':
+      case 'cts': { // Zeit in zwei Zahlenfeldern (iPhone-Zahlentastatur hat keinen Doppelpunkt) – seit 1.6.1
+        const box = t.closest('.cardio');
+        const m = num(box.querySelector('[data-f="ctm"]').value), sec = num(box.querySelector('[data-f="cts"]').value);
+        s.cardio[k].tsec = m == null && sec == null ? null : Math.round((m || 0) * 60 + (sec || 0));
+        rowUpdate(s.cardio[k], k, t); break;
+      }
       case 'cdist': s.cardio[k].dist = num(v); rowUpdate(s.cardio[k], k, t); break;
       case 'cstr': s.cardio[k].strokes = num(v); rowUpdate(s.cardio[k], k, t); break;
       case 'standl': s.stand = s.stand || {}; s.stand.l = num(v); break;
