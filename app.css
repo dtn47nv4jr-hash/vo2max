@@ -27,8 +27,9 @@
   --tabs-h: 58px;
   color-scheme: light dark;
 }
+/* Dunkel: automatisch nach iPhone-Einstellung oder fest unter „Mehr“ → Darstellung (seit 1.9.1) */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #0f1413;
     --card: #182120;
     --ink: #e7eeeb;
@@ -51,6 +52,30 @@
     --on-c: #0f1413;
   }
 }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0f1413;
+  --card: #182120;
+  --ink: #e7eeeb;
+  --muted: #9aa9a4;
+  --line: #2b3633;
+  --field: #111917;
+  --accent: #3fc2ad;
+  --accent-ink: #062520;
+  --accent-soft: #143430;
+  --green-soft: #15301f;
+  --yellow-soft: #33290b;
+  --red-soft: #3b1917;
+  --warm: #f0c03a; --warm-soft: #33290b;
+  --kraft: #ffa057; --kraft-soft: #3a2412;
+  --aus: #74abff; --aus-soft: #14243b;
+  --int: #ff8075; --int-soft: #3b1815;
+  --bal: #c493ff; --bal-soft: #281b3a;
+  --mob: #ff76b8; --mob-soft: #3a1528;
+  --slate: #a3b3ca; --slate-soft: #1e2632;
+  --on-c: #0f1413;
+}
+:root[data-theme="light"] { color-scheme: light; }
 
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }

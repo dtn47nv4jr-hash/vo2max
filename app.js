@@ -937,6 +937,10 @@ function renderMehr() {
     <label class="field">Satzpause<select data-set="pause">${PAUSES.map(p => `<option value="${p}" ${p === pauseLength() ? 'selected' : ''}>${p ? `${p} Sekunden` : 'Aus'}</option>`).join('')}</select></label>
     <p class="hint">Startet, sobald du einen Satz abhakst; Antippen beendet die Pause. Beim einarmigen Rudern erst nach beiden Seiten. Die letzten 3 Sekunden zählt ein Piepton herunter, am Ende ein langer Ton und 3 Sekunden Blinken – solange die App offen ist. Die Lautstärke regeln die Lautstärketasten. Während der Pause bleibt der Bildschirm an.</p>
   </section>`;
+  h += `<section class="card"><h2>Darstellung</h2>
+    <label class="field">Farben<select data-set="theme">${THEMES.map(([v, l]) => `<option value="${v}" ${(state.settings.theme || 'auto') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+    <p class="hint">Das iPhone meldet gerade: ${systemDark() ? 'dunkel' : 'hell'}. „Automatisch“ folgt dieser Meldung; „Hell“ oder „Dunkel“ gilt immer.</p>
+  </section>`;
   h += `<section class="card"><h2>Ärztliche Freigabe</h2>
     <label class="switch"><input type="checkbox" data-set="freigabeOn" ${st.freigabe ? 'checked' : ''}><span>Freigabe für Intervalle erhalten</span></label>
     ${st.freigabe ? `<label class="field">Datum der Freigabe<input type="date" data-set="freigabe" value="${st.freigabe}"></label>
@@ -974,12 +978,25 @@ function renderMehr() {
       <li>Intervalle erst nach ärztlicher Freigabe (Belastungs-EKG bis zur Ausbelastung).</li>
       <li>Vorschlag auf Basis deiner Daten, kein ärztlicher Trainingsplan.</li></ul></details>
   </section>
-  <p class="foot muted">Version 1.9 · funktioniert offline · keine Daten verlassen das Gerät, außer du exportierst sie.</p>`;
+  <p class="foot muted">Version 1.9.1 · funktioniert offline · keine Daten verlassen das Gerät, außer du exportierst sie.</p>`;
   return h;
 }
 
 // ---------- Rendern ----------
+// Darstellung (seit 1.9.1): automatisch nach iPhone-Einstellung oder fest hell/dunkel
+const THEMES = [['auto', 'Automatisch (wie iPhone)'], ['light', 'Hell'], ['dark', 'Dunkel']];
+const systemDark = () => !!(window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
+function applyTheme() {
+  const t = state.settings.theme;
+  const root = document.documentElement;
+  if (t === 'light' || t === 'dark') root.dataset.theme = t; else delete root.dataset.theme;
+  const dark = t === 'dark' || (t !== 'light' && systemDark());
+  document.querySelectorAll('meta[name="theme-color"]').forEach(m => { m.content = dark ? '#0f1413' : '#f3f5f4'; });
+}
+if (window.matchMedia) matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { applyTheme(); if (route.tab === 'mehr') render(); });
+
 function render() {
+  applyTheme();
   renderedDay = todayISO();
   ensureDraft();
   const page = { heute: renderHeute, tag: renderTag, woche: renderWoche, verlauf: renderVerlauf, mehr: renderMehr, kopf: renderKopf, kopfedit: renderKopfEdit }[route.tab];
@@ -1443,6 +1460,7 @@ function onField(e) {
       case 'freigabeOn': st.freigabe = t.checked ? todayISO() : null; break;
       case 'freigabe': if (t.value) st.freigabe = t.value; break;
       case 'pause': st.pause = Number(t.value); if (!st.pause) stopPause(); break;
+      case 'theme': st.theme = t.value; break;
     }
     save();
     render();
