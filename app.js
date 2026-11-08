@@ -401,7 +401,15 @@ function lastSets(id, before) {
     const sets = state.sessions[d].ex?.[id];
     if (sets && sets.some(x => x.ok)) return { date: d, sets };
   }
-  return null;
+  // seit 1.7: neue Übung ohne eigene Vorgeschichte → letzter Wert der Vorgängerübung (z. B. Split Squats beidseitig)
+  return EX[id].legacy ? lastSets(EX[id].legacy, before) : null;
+}
+
+// Bausteine einer Einheit; ältere Einheiten mit dem gemeinsamen Split-Squat-Eintrag (bis 1.6) zeigen diesen weiter an
+function sessionBlocks(day, s) {
+  const blocks = blocksFor(day, s.mode);
+  if (!s.ex?.bulgarian || s.ex.bulgarian_l || s.ex.bulgarian_r) return blocks;
+  return blocks.filter(b => b.id !== 'bulgarian_r').map(b => (b.id === 'bulgarian_l' ? { ...b, id: 'bulgarian' } : b));
 }
 
 function defaultSets(id, n, date) {
@@ -441,7 +449,8 @@ function hasProgress(s) {
     || Object.values(s.ex).some(a => a.some(x => x.ok))
     || Object.values(s.cardio).some(c => c.ok)
     || s.iv.some(x => x.ok) || s.rounds.some(Boolean)
-    || (!!s.stand && (s.stand.l != null || s.stand.r != null));
+    || (!!s.stand && (s.stand.l != null || s.stand.r != null))
+    || s.sit != null;
 }
 
 function statusOf(date) {
@@ -497,7 +506,29 @@ function standHTML(s, day) {
       <label>Einbeinstand links (s)<input data-f="standl" value="${deNum(t.l)}" placeholder="Sek." inputmode="decimal"></label>
       <label>Einbeinstand rechts (s)<input data-f="standr" value="${deNum(t.r)}" placeholder="Sek." inputmode="decimal"></label>
     </div>
-    <p class="hint">Je Bein den besten von 3 Versuchen eintragen.${last ? ` Zuletzt (${fmtShort(last.date)}): links ${sec(last.l)} · rechts ${sec(last.r)}.` : ''}</p>`;
+    <p class="hint">Je Bein den besten von 3 Versuchen eintragen.${last ? ` Zuletzt (${fmtShort(last.date)}): links ${sec(last.l)} · rechts ${sec(last.r)}.` : ''}</p>
+    ${sitDue(s, day) ? sitHTML(s, day) : ''}`;
+}
+
+// 30-Sekunden-Aufstehtest einmal im Monat (seit 1.7): erscheint sonntags im Balance-Block,
+// bis im laufenden Monat ein Wert eingetragen ist. Misst Beinkraft fürs Aufstehen aus dem Stuhl.
+function lastSit(date) {
+  const d = Object.keys(state.sessions).filter(x => x < date).sort().reverse()
+    .find(x => state.sessions[x].sit != null);
+  return d ? { date: d, n: state.sessions[d].sit } : null;
+}
+function sitDue(s, day) {
+  if (s.sit != null) return true;
+  if (day.kind !== 'sunday') return false;
+  const last = lastSit(day.date);
+  return !last || last.date.slice(0, 7) !== day.date.slice(0, 7);
+}
+function sitHTML(s, day) {
+  const last = lastSit(day.date);
+  return `<div class="c-row two">
+      <label>Aufstehtest 30 s (Wdh.)<input data-f="sit" value="${deNum(s.sit)}" placeholder="Anzahl" inputmode="numeric"></label>
+    </div>
+    <p class="hint">Monatstest: Bank oder Stuhl ohne Armlehnen, Arme vor der Brust gekreuzt. 30 s lang so oft wie möglich ganz aufstehen und wieder hinsetzen; ein über die Hälfte geschafftes Aufstehen am Ende zählt mit. Mittlere Hälfte der Männer 65–69: 12–18.${last ? ` Zuletzt (${fmtShort(last.date)}): ${deNum(last.n)}.` : ''}</p>`;
 }
 
 function exHTML(b, s, day) {
@@ -652,7 +683,7 @@ function modeSwitch(day, s) {
 function sessionHTML(day) {
   const s = sessionFor(day);
   const t = dayTitle(day, s.mode);
-  const blocks = blocksFor(day, s.mode);
+  const blocks = sessionBlocks(day, s);
   const st = statusOf(day.date);
   const effect = effectOf(day.date);
   let h = `<section class="session" data-date="${day.date}">
@@ -911,7 +942,7 @@ function renderMehr() {
       <li>Intervalle erst nach ärztlicher Freigabe (Belastungs-EKG bis zur Ausbelastung).</li>
       <li>Vorschlag auf Basis deiner Daten, kein ärztlicher Trainingsplan.</li></ul></details>
   </section>
-  <p class="foot muted">Version 1.6.1 · funktioniert offline · keine Daten verlassen das Gerät, außer du exportierst sie.</p>`;
+  <p class="foot muted">Version 1.7 · funktioniert offline · keine Daten verlassen das Gerät, außer du exportierst sie.</p>`;
   return h;
 }
 
@@ -959,7 +990,7 @@ function nextUp(s, day, id, i) {
     const j = (s.ex[k] || []).findIndex(x => !x.ok);
     if (j >= 0) return `Als Nächstes: ${EX[k].name}, Satz ${j + 1}`;
   }
-  const ids = blocksFor(day, s.mode).filter(b => b.type === 'ex').map(b => b.id);
+  const ids = sessionBlocks(day, s).filter(b => b.type === 'ex').map(b => b.id);
   const pos = ids.indexOf(id);
   const next = [...ids.slice(pos + 1), ...ids.slice(0, pos)].find(k => (s.ex[k] || []).some(x => !x.ok));
   return next ? `Als Nächstes: ${EX[next].name}` : null;
@@ -1157,7 +1188,7 @@ function exportCSV() {
     if (!hasProgress(s)) continue;
     const info = dayInfo(state.settings, d);
     const title = info.week ? dayTitle(info, s.mode).title : s.kind;
-    einheiten.push([fmtFull(d), title, info.week ? weekLabel(info.week) : '', STATUS_LABEL[statusOf(d)], s.mode, s.doneOn ? fmtFull(s.doneOn) : '', deNum(s.stand?.l), deNum(s.stand?.r), s.note]);
+    einheiten.push([fmtFull(d), title, info.week ? weekLabel(info.week) : '', STATUS_LABEL[statusOf(d)], s.mode, s.doneOn ? fmtFull(s.doneOn) : '', deNum(s.stand?.l), deNum(s.stand?.r), deNum(s.sit), s.note]);
     for (const [id, sets] of Object.entries(s.ex)) {
       sets.forEach((x, i) => kraft.push([fmtFull(d), title, EX[id].name, i + 1, x.r ?? '', deNum(x.kg || 0), x.ok ? 'ja' : 'nein']));
     }
@@ -1170,7 +1201,7 @@ function exportCSV() {
   }
   const t = todayISO();
   shareFiles([
-    csvFile(`vo2max-einheiten-${t}.csv`, ['Datum', 'Einheit', 'Planwoche', 'Status', 'Variante', 'Erledigt am', 'Einbeinstand links (s)', 'Einbeinstand rechts (s)', 'Notiz'], einheiten),
+    csvFile(`vo2max-einheiten-${t}.csv`, ['Datum', 'Einheit', 'Planwoche', 'Status', 'Variante', 'Erledigt am', 'Einbeinstand links (s)', 'Einbeinstand rechts (s)', 'Aufstehtest 30 s (Wdh.)', 'Notiz'], einheiten),
     csvFile(`vo2max-kraft-${t}.csv`, ['Datum', 'Einheit', 'Übung', 'Satz', 'Wdh', 'kg', 'erledigt'], kraft),
     csvFile(`vo2max-ausdauer-${t}.csv`, ['Datum', 'Einheit', 'Block', 'Minuten', 'Gerät', 'Puls', 'Watt', 'rpm / Schläge pro min', 'erledigt', 'Stufe', 'Zeit Gerät (min:s)', 'Strecke (m)', 'Schläge', 'Ø /500 m'], ausdauer),
     csvFile(`vo2max-ampel-${t}.csv`, ['Datum', 'Ruhepuls Vortag', 'Vitalwerte', 'Befinden', 'Ampel'], ampel),
@@ -1358,6 +1389,7 @@ function onField(e) {
       case 'cstr': s.cardio[k].strokes = num(v); rowUpdate(s.cardio[k], k, t); break;
       case 'standl': s.stand = s.stand || {}; s.stand.l = num(v); break;
       case 'standr': s.stand = s.stand || {}; s.stand.r = num(v); break;
+      case 'sit': s.sit = num(v); break;
       case 'ivhr': s.iv[i].hr = v.trim(); break;
       case 'note': s.note = v; break;
     }

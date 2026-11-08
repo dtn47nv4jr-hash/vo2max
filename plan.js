@@ -18,7 +18,7 @@ const todayISO = () => isoDate(new Date());
 // step: Steigerung in kg (0 = keine), bw: Körpergewicht (kg = Zusatzgewicht)
 const EX = {
   latzug_a:      { name: 'Latzug', reps: [12, 10, 8], kg: 55, step: 2.5, hint: 'Zur oberen Brust ziehen, Schulterblätter nach hinten-unten.' },
-  beinpresse:    { name: 'Beinpresse', reps: [12, 10, 8], kg: 80, step: 5, hint: 'Füße schulterbreit, eher hoch auf der Platte (knieschonend). Knie oben nicht ganz durchstrecken, Tiefe schmerzfrei.' },
+  beinpresse:    { name: 'Beinpresse', reps: [12, 10, 8], kg: 80, step: 5, hint: 'Tempo: hochdrücken zügig, ablassen langsam (3 s) – trainiert auch die Schnellkraft, mit der man ein Stolpern abfängt. Füße schulterbreit, eher hoch auf der Platte (knieschonend). Knie oben nicht ganz durchstrecken, Tiefe schmerzfrei.' },
   rudermaschine: { name: 'Rudermaschine', reps: [12, 10, 8], kg: 55, step: 2.5, hint: 'Aufrecht sitzen, Ellbogen eng am Körper.' },
   brustpresse_a: { name: 'Brustpresse', reps: [12, 10, 8], kg: 37.5, step: 2.5, hint: 'Kontrolliert zurück, Schultern unten.' },
   beinbeuger_a:  { name: 'Beinbeuger', reps: [10, 10, 10], kg: 50, step: 5, hint: 'Langsam ablassen (3 s).' },
@@ -27,18 +27,22 @@ const EX = {
   waden:         { name: 'Waden heben', extra: true, reps: [15, 15], kg: 0, step: 0, bw: true, hint: 'Langsam, 3 s ablassen – stärkt Fuß und Achillessehne. Nur schmerzfrei.' },
 
   latzug_b:      { name: 'Latzug', reps: [12, 10, 8], kg: 50, step: 2.5, hint: 'Etwas leichter als am Dienstag, dafür sauber bis zur Brust.' },
-  goblet:        { name: 'Goblet Squats', reps: [12, 10, 8], kg: 12, step: 2, hint: 'Mit Kurzhantel, Ziel 16 kg × 12. Auf eine Bank setzen, falls das Knie meckert.' },
+  goblet:        { name: 'Goblet Squats', reps: [12, 10, 8], kg: 12, step: 2, hint: 'Tempo: hoch zügig, runter langsam (3 s) – trainiert auch die Schnellkraft, mit der man ein Stolpern abfängt. Mit Kurzhantel, Ziel 16 kg × 12. Auf eine Bank setzen, falls das Knie meckert.' },
   rudern_l:      { name: 'Einarmiges Rudern links', reps: [12, 10, 8], kg: 20, step: 2, pair: 'rudern_r', hint: 'Rücken gerade, Hantel zur Hüfte ziehen.' },
   rudern_r:      { name: 'Einarmiges Rudern rechts', reps: [12, 10, 8], kg: 20, step: 2, pair: 'rudern_l', hint: 'Rücken gerade, Hantel zur Hüfte ziehen.' },
   brustpresse_b: { name: 'Brustpresse', reps: [12, 10, 8], kg: 35, step: 2.5, hint: 'Kontrolliert zurück, Schultern unten.' },
   beinbeuger_b:  { name: 'Beinbeuger', reps: [12, 10, 10], kg: 50, step: 5, hint: 'Langsam ablassen (3 s).' },
+  // bis 1.6 ein gemeinsamer Eintrag für beide Beine – bleibt für ältere Einheiten lesbar
   bulgarian:     { name: 'Bulgarian Split Squats', extra: true, reps: [10, 10], range: '8–10 je Bein', kg: 0, step: 0, bw: true, hint: 'Kurze Schrittstellung, Hand an einer Stange. Tiefe nach Kniegefühl – zugleich Balance-Training.' },
+  // seit 1.7 je Bein getrennt, damit ein Seitenunterschied sichtbar wird (Verdacht 01.11.2026: rechtes Bein schwächer)
+  bulgarian_l:   { name: 'Bulgarian Split Squats links', extra: true, reps: [10, 10], range: '8–10', kg: 0, step: 0, bw: true, pair: 'bulgarian_r', legacy: 'bulgarian', hint: 'Linkes Bein vorn arbeitet, rechter Fuß hinten auf der Bank. Kurze Schrittstellung, Hand an einer Stange, Tiefe nach Kniegefühl. Beide Seiten gleich viele Wiederholungen – die schwächere Seite gibt die Zahl vor. Hoch zügig, runter langsam (3 s).' },
+  bulgarian_r:   { name: 'Bulgarian Split Squats rechts', extra: true, reps: [10, 10], range: '8–10', kg: 0, step: 0, bw: true, pair: 'bulgarian_l', legacy: 'bulgarian', hint: 'Rechtes Bein vorn arbeitet, linker Fuß hinten auf der Bank. Kurze Schrittstellung, Hand an einer Stange, Tiefe nach Kniegefühl. Beide Seiten gleich viele Wiederholungen – die schwächere Seite gibt die Zahl vor. Hoch zügig, runter langsam (3 s).' },
   seitheben:     { name: 'Seitheben', extra: true, reps: [15, 15], range: '12–15', kg: 5, step: 1, hint: 'Nur bis Schulterhöhe.' },
   beineheben:    { name: 'Beine heben / Crunch', extra: true, reps: [12, 12], kg: 0, step: 0, bw: true, hint: 'Rücken bleibt am Boden bzw. an der Lehne.' },
 };
 
 const KRAFT_A = { app: ['latzug_a', 'beinpresse', 'rudermaschine', 'brustpresse_a', 'beinbeuger_a', 'hyperext'], extra: ['hipthrust', 'waden'] };
-const KRAFT_B = { app: ['latzug_b', 'goblet', 'rudern_l', 'rudern_r', 'brustpresse_b', 'beinbeuger_b'], extra: ['bulgarian', 'seitheben', 'beineheben'] };
+const KRAFT_B = { app: ['latzug_b', 'goblet', 'rudern_l', 'rudern_r', 'brustpresse_b', 'beinbeuger_b'], extra: ['bulgarian_l', 'bulgarian_r', 'seitheben', 'beineheben'] };
 
 const DEV_STUDIO = ['Ergometer', 'Rudergerät', 'Crosstrainer'];
 const DEV_OUT = ['Rad outdoor', 'Gehen outdoor', 'Schwimmen', 'Nordic Walking', 'Lauf-Geh-Wechsel'];
