@@ -113,7 +113,7 @@ function prevTraining(date) {
   const s = state.sessions[addDays(date, -1)];
   if (!s || !hasProgress(s)) return null;
   const ex = Object.entries(s.ex).filter(([, a]) => a.some(x => x.ok)).map(([id]) => EX[id]?.name || id);
-  return { label: KIND_NAME[s.kind] || s.kind, ex, kraft: ex.length > 0 };
+  return { label: s.kind === 'sunday' && isHome(s.mode) ? 'Sonntag zuhause' : (KIND_NAME[s.kind] || s.kind), ex, kraft: ex.length > 0 };
 }
 const prevText = t => (t ? `${t.label}${t.ex.length ? ` (${t.ex.join(', ')})` : ' – ohne Kraftübungen'}` : 'kein Training erfasst');
 const medText = m => [m.name.trim(), m.dose.trim(), m.time && `um ${m.time}`].filter(Boolean).join(' ') + (m.effect ? `, Wirkung ${m.effect}` : '');
@@ -406,8 +406,17 @@ function lastSets(id, before) {
 }
 
 // Bausteine einer Einheit; ältere Einheiten mit dem gemeinsamen Split-Squat-Eintrag (bis 1.6) zeigen diesen weiter an
+// Zuhause Mark (seit 1.8): Prep Cals 1–3, Cal. Session 1–10 und Stretch 1–3 laufen der Reihe nach durch –
+// gezählt werden frühere Zuhause-Mark-Sonntage mit Eintrag.
+function homeMarkCount(date) {
+  return Object.keys(state.sessions).filter(d => d < date && state.sessions[d].mode === 'homeMark' && hasProgress(state.sessions[d])).length;
+}
 function sessionBlocks(day, s) {
-  const blocks = blocksFor(day, s.mode);
+  let blocks = blocksFor(day, s.mode);
+  if (blocks.some(b => b.rot)) {
+    const k = homeMarkCount(day.date);
+    blocks = blocks.map(b => (b.rot ? { ...b, label: `${b.rot[1]} ${(k % b.rot[0]) + 1}` } : b));
+  }
   if (!s.ex?.bulgarian || s.ex.bulgarian_l || s.ex.bulgarian_r) return blocks;
   return blocks.filter(b => b.id !== 'bulgarian_r').map(b => (b.id === 'bulgarian_l' ? { ...b, id: 'bulgarian' } : b));
 }
@@ -642,6 +651,7 @@ function cardioHTML(b, s, day) {
       <label>Ø-Puls<input data-f="chr" data-k="${b.key}" value="${esc(c.hr)}" placeholder="opt." inputmode="numeric"></label>
     </div>
     ${b.dev.includes('Ergometer') ? powerHTML(b, c, day) : ''}
+    ${b.list ? `<details class="more"><summary>${esc(b.listLabel || 'Übungen')}</summary><ul>${b.list.map(x => `<li>${esc(x)}</li>`).join('')}</ul></details>` : ''}
     ${b.hint ? `<p class="hint">${esc(b.hint + (b.z2 && b.dev.includes('Ergometer') ? (DEV_HINT[c.dev] || '') : ''))}</p>` : ''}
   </div>`;
 }
@@ -672,9 +682,10 @@ function circuitHTML(s) {
 }
 
 function modeSwitch(day, s) {
-  const modes = [['normal', 'Normal']];
+  const modes = [['normal', day.kind === 'sunday' ? 'Studio' : 'Normal']];
   if (isKraft(day.kind) || (day.kind === 'sunday' && day.week.iv)) modes.push(['easy', 'Locker (Ampel)']);
   if (isKraft(day.kind)) modes.push(['minimal', 'Minimalprogramm']);
+  if (day.kind === 'sunday') modes.push(['homeClaude', 'Zuhause Claude'], ['homeMark', 'Zuhause Mark']); // seit 1.8
   if (modes.length < 2) return '';
   return `<div class="seg" role="group" aria-label="Variante">${modes.map(([m, l]) =>
     `<button data-act="mode" data-mode="${m}" class="${s.mode === m ? 'on' : ''}" aria-pressed="${s.mode === m}">${l}</button>`).join('')}</div>`;
@@ -942,7 +953,7 @@ function renderMehr() {
       <li>Intervalle erst nach ärztlicher Freigabe (Belastungs-EKG bis zur Ausbelastung).</li>
       <li>Vorschlag auf Basis deiner Daten, kein ärztlicher Trainingsplan.</li></ul></details>
   </section>
-  <p class="foot muted">Version 1.7 · funktioniert offline · keine Daten verlassen das Gerät, außer du exportierst sie.</p>`;
+  <p class="foot muted">Version 1.8 · funktioniert offline · keine Daten verlassen das Gerät, außer du exportierst sie.</p>`;
   return h;
 }
 
@@ -1192,7 +1203,7 @@ function exportCSV() {
     for (const [id, sets] of Object.entries(s.ex)) {
       sets.forEach((x, i) => kraft.push([fmtFull(d), title, EX[id].name, i + 1, x.r ?? '', deNum(x.kg || 0), x.ok ? 'ja' : 'nein']));
     }
-    for (const [k, c] of Object.entries(s.cardio)) { const r = rowCalc(c); ausdauer.push([fmtFull(d), title, CARDIO_NAME[k] || k, c.min ?? '', c.dev, c.hr, deNum(c.watt), deNum(c.rpm), c.ok ? 'ja' : 'nein', c.lvl ?? '', fmtMMSS(c.tsec), deNum(c.dist), deNum(c.strokes), r ? fmtMMSS(r.split) : '']); }
+    for (const [k, c] of Object.entries(s.cardio)) { const r = rowCalc(c); ausdauer.push([fmtFull(d), title, k === 'so' && isHome(s.mode) ? 'Sonntag zuhause' : (CARDIO_NAME[k] || k), c.min ?? '', c.dev, c.hr, deNum(c.watt), deNum(c.rpm), c.ok ? 'ja' : 'nein', c.lvl ?? '', fmtMMSS(c.tsec), deNum(c.dist), deNum(c.strokes), r ? fmtMMSS(r.split) : '']); }
     s.iv.forEach((x, i) => ausdauer.push([fmtFull(d), title, `Intervall ${i + 1}`, '', '', x.hr, '', '', x.ok ? 'ja' : 'nein']));
   }
   for (const d of Object.keys(state.checkins).sort()) {

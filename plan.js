@@ -56,6 +56,24 @@ const BALANCE = [
   'Tandemgang 2 × 10 Schritte vor- und rückwärts (Ferse direkt vor die Zehen)',
   'Ausfallschritt rückwärts langsam 2 × 6 je Bein, 2 s Pause unten',
 ];
+// Sonntag zuhause (seit 1.8): „Zuhause Claude“ = Zone-2-Zirkel mit Band und Hanteln,
+// „Zuhause Mark“ = Mark-Lauren-Videos mit Balance, Griff und Stretch. Intervalle gibt es zuhause nicht.
+const HOME_A_STATIONS = [
+  'Marschieren mit hohen Knien und Armschwung',
+  'Rudern mit dem Band (Band in Brusthöhe befestigen, z. B. Türanker)',
+  'Ausfallschritt rückwärts im Wechsel, langsam',
+  'Schulterdrücken mit leichten Hanteln im Wechsel',
+  'Kniebeuge zum Stuhl mit leichter Hantel – hoch zügig, runter langsam',
+];
+const HOME_MOBILITY = [
+  'Katze-Kuh',
+  'Hüftbeuger-Dehnung im Kniestand',
+  'Taube',
+  'Brustwirbelsäule drehen im Vierfüßlerstand',
+  'Schulterblätter nach hinten-unten ziehen',
+];
+const isHome = mode => mode === 'homeClaude' || mode === 'homeMark';
+const roundsText = min => { const x = Math.round(min / 5) / 2; return `${Math.floor(x)}${x % 1 ? '½' : ''}`; };
 const CIRCUIT = [
   'Kniebeuge zum Stuhl – 12',
   'Liegestütz an Tisch oder Bank – 10',
@@ -140,7 +158,10 @@ function dayTitle(day, mode = 'normal') {
       : { title: 'Kraft B + Zone 2', sub: 'Studio · App „Ganzkörper mit Goblet Squats“', dur: '~80 min' };
     case 'opt':    return { title: 'Frei – optional locker', sub: '30–45 min draußen, kein Muss' };
     case 'free':   return { title: 'Frei', sub: 'Wochenplanung & Einkauf – Ruhetag vor dem Sonntag' };
-    case 'sunday': return w.iv && mode !== 'easy'
+    case 'sunday':
+      if (mode === 'homeClaude') return { title: 'Zuhause Claude · Zirkel', sub: 'Zone-2-Zirkel mit Band und Hanteln + Balance + Griff + Mobility', dur: `~${sundayMinutes(w) + 25} min` };
+      if (mode === 'homeMark') return { title: 'Zuhause Mark · Bodyweight', sub: 'Prep Cals + Cal. Session + Balance + Griff + Stretch', dur: `~${Math.max(sundayMinutes(w), 40) + 15} min` };
+      return w.iv && mode !== 'easy'
       ? { title: `Studio · Intervalle ${w.iv[0]} × ${w.iv[1]} min`, sub: 'Ergometer, Rudergerät oder Crosstrainer + Balance + Yoga', dur: `~${sundayMinutes(w) + 15} min` }
       : { title: 'Studio · Zone 2', sub: 'Ergometer, Rudergerät oder Crosstrainer + Balance + Yoga', dur: `~${sundayMinutes(w) + 15} min` };
   }
@@ -193,6 +214,30 @@ function blocksFor(day, mode = 'normal') {
       return [];
     case 'sunday': {
       const yoga = { type: 'check', key: 'yoga', label: 'Yoga / Mobility', detail: '10 min · Hüfte, Rücken, Schultern' };
+      const min = sundayMinutes(w);
+      const ivNote = w.iv ? ' In Intervallwochen zuhause nur Zone 2 – Intervalle zuhause erst nach der ärztlichen Freigabe.' : '';
+      if (mode === 'homeClaude') {
+        return [
+          { type: 'check', key: 'warmup', label: 'Aufwärmen', detail: '5 min · marschieren, Arm- und Hüftkreisen, leichtes Rudern mit dem Band' },
+          { type: 'cardio', key: 'so', label: 'Zone-2-Zirkel zuhause', min, dev: ['Zirkel zuhause', 'Gehen outdoor', 'Marschieren / Treppe'],
+            list: HOME_A_STATIONS, listLabel: 'Stationen',
+            hint: `5 Stationen je 2 min ohne Pause = 1 Runde (10 min) – heute ${roundsText(min)} Runden. Puls ~115–130: darüber langsamer oder leichter, darunter mehr Tempo. Gewichte bewusst leicht – Ziel ist der Puls, nicht die Kraft. Watch: „Gemischtes Cardio“.${ivNote}` },
+          balance,
+          { type: 'check', key: 'hang', label: 'Hängen an der Klimmzugstange', detail: '3 × 20–30 s (Füße dürfen den Boden berühren) · Band auseinanderziehen 2 × 15' },
+          { type: 'check', key: 'yoga', label: 'Mobility auf der Matte', detail: '10 min', list: HOME_MOBILITY },
+        ];
+      }
+      if (mode === 'homeMark') {
+        return [
+          { type: 'check', key: 'prepcals', label: 'Prep Cals', rot: [3, 'Prep Cals'], detail: 'Mark Lauren · Prep Calisthenics · ca. 19 min · 60 s Arbeit / 10 s Pause · Übergänge Liegen–Knien–Stehen, Krabbeln, Step-ups' },
+          { type: 'check', key: 'calsession', label: 'Cal. Session', rot: [10, 'Cal. Session'], detail: 'Mark Lauren · Calisthenics Sessions · ca. 20 min · über ~135 Puls ohne Sprung (marschieren statt Jumping Jacks, Kniebeuge ohne Hüpfer, gehen statt Low Knee Run)' },
+          { type: 'cardio', key: 'so', label: 'Bewegungszeit gesamt', min, dev: ['Mark Lauren', 'Gehen outdoor', 'Marschieren / Treppe'],
+            hint: `Minuten und Ø-Puls aus der Watch („Gemischtes Cardio“) eintragen.${min > 40 ? ` Heute ${min} min: nach den beiden Videos noch ${min - 40} min zügig marschieren, gern auf der Treppe oder ab Haustür.` : ''} Ziel-Puls ~115–135.${ivNote}` },
+          balance,
+          { type: 'check', key: 'hang', label: 'Hängen an der Klimmzugstange', detail: '3 × 20–30 s (Füße dürfen den Boden berühren)' },
+          { type: 'check', key: 'yoga', label: 'Stretch', rot: [3, 'Stretch'], detail: 'Mark Lauren · Dehnübungen (DE) · laut Video – eine andere Nummer ist genauso gut' },
+        ];
+      }
       if (w.iv && mode !== 'easy') {
         return [
           { type: 'intervals', n: w.iv[0], d: w.iv[1], hr: IV_HR[w.phase] },
