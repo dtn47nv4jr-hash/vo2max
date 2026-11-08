@@ -219,7 +219,7 @@ function blocksFor(day, mode = 'normal') {
       if (mode === 'homeClaude') {
         return [
           { type: 'check', key: 'warmup', label: 'Aufwärmen', detail: '5 min · marschieren, Arm- und Hüftkreisen, leichtes Rudern mit dem Band' },
-          { type: 'cardio', key: 'so', label: 'Zone-2-Zirkel zuhause', min, dev: ['Zirkel zuhause', 'Gehen outdoor', 'Marschieren / Treppe'],
+          { type: 'cardio', key: 'so', label: 'Zone-2-Zirkel zuhause', min, dev: ['Zirkel', 'Gehen outdoor', 'Marschieren / Treppe'],
             list: HOME_A_STATIONS, listLabel: 'Stationen',
             hint: `5 Stationen je 2 min ohne Pause = 1 Runde (10 min) – heute ${roundsText(min)} Runden. Puls ~115–130: darüber langsamer oder leichter, darunter mehr Tempo. Gewichte bewusst leicht – Ziel ist der Puls, nicht die Kraft. Watch: „Gemischtes Cardio“.${ivNote}` },
           balance,

@@ -196,7 +196,7 @@ const medBanner = ym => (haStats(haMonth(ym)).medDays >= 10 ? `<div class="banne
 // Karte auf „Heute“
 function kopfCard(date) {
   const today = haOn(date).sort((a, b) => a.time.localeCompare(b.time));
-  return `<section class="card">
+  return `<section class="card ha">
     <h2>Kopfschmerz-Protokoll</h2>
     ${today.map(e => `<button class="row" data-act="ha-open" data-id="${e.id}"><span>${esc(haLine(e))}</span><span class="muted">ändern ›</span></button>`).join('')}
     <div class="actions"><button class="ghost" data-act="ha-new">+ Kopfschmerz eintragen</button><button class="link" data-act="ha-list">Übersicht & Bericht ›</button></div>
@@ -486,6 +486,20 @@ function allHit(id, sets) {
 }
 
 // ---------- Bausteine ----------
+// Farben je Art des Bausteins (seit 1.9): Aufwärmen gelb, Kraft orange, Ausdauer blau, Intervalle rot,
+// Balance violett, Beweglichkeit pink. Abhaken bleibt grün.
+const CAT_NAME = { warm: 'Aufwärmen', kraft: 'Kraft', aus: 'Ausdauer', int: 'Intervalle', bal: 'Balance', mob: 'Beweglichkeit' };
+function blockCat(b) {
+  if (b.type === 'ex' || b.type === 'circuit') return 'kraft';
+  if (b.type === 'intervals') return 'int';
+  if (b.type === 'cardio') return 'aus';
+  return { warmup: 'warm', balance: 'bal', yoga: 'mob', hang: 'kraft', prepcals: 'kraft', calsession: 'aus', walk: 'aus' }[b.key] || 'aus';
+}
+function dayCat(kind, mode, w) {
+  if (isKraft(kind)) return 'kraft';
+  if (kind === 'sunday') return w && w.iv && mode === 'normal' ? 'int' : 'aus';
+  return kind === 'free' ? 'none' : 'aus';
+}
 const STATUS_LABEL = { open: 'Offen', started: 'Begonnen', done: 'Erledigt', skipped: 'Ausgelassen' };
 const STATUS_ICON = { open: '○', started: '◐', done: '✓', skipped: '–' };
 
@@ -697,7 +711,7 @@ function sessionHTML(day) {
   const blocks = sessionBlocks(day, s);
   const st = statusOf(day.date);
   const effect = effectOf(day.date);
-  let h = `<section class="session" data-date="${day.date}">
+  let h = `<section class="session c-${dayCat(day.kind, s.mode, day.week)}" data-date="${day.date}">
     <div class="sess-head">
       <div><h2>${esc(t.title)}</h2><p class="sub">${esc(t.sub)}${t.dur ? ` · ${esc(t.dur)}` : ''}</p></div>
       ${blocks.length ? `<span class="pill ${st}">${STATUS_ICON[st]} ${STATUS_LABEL[st]}</span>` : ''}
@@ -707,14 +721,20 @@ function sessionHTML(day) {
     h += `<div class="banner ${effect === 'rest' ? 'r' : 'y'}">${esc(effectText(day.date))}</div>`;
   }
   h += modeSwitch(day, s);
-  for (const b of blocks) {
-    if (b.type === 'check') h += checkHTML(b, s, day);
-    else if (b.type === 'head') h += `<h3 class="block-head">${esc(b.label)}</h3>${b.hint ? `<p class="hint">${esc(b.hint)}</p>` : ''}`;
-    else if (b.type === 'ex') h += exHTML(b, s, day);
-    else if (b.type === 'cardio') h += cardioHTML(b, s, day);
-    else if (b.type === 'intervals') h += intervalsHTML(b, s);
-    else if (b.type === 'circuit') h += circuitHTML(s);
-  }
+  const cats = blocks.map((b, i) => blockCat(b.type === 'head' ? (blocks.slice(i + 1).find(x => x.type !== 'head') || b) : b));
+  const used = Object.keys(CAT_NAME).filter(c => cats.includes(c));
+  if (used.length > 1) h += `<div class="legend">${used.map(c => `<span class="c-${c}"><i></i>${CAT_NAME[c]}</span>`).join('')}</div>`;
+  blocks.forEach((b, i) => {
+    const c = cats[i];
+    if (b.type === 'head') { h += `<h3 class="block-head c-${c}">${esc(b.label)}</h3>${b.hint ? `<p class="hint">${esc(b.hint)}</p>` : ''}`; return; }
+    let x = '';
+    if (b.type === 'check') x = checkHTML(b, s, day);
+    else if (b.type === 'ex') x = exHTML(b, s, day);
+    else if (b.type === 'cardio') x = cardioHTML(b, s, day);
+    else if (b.type === 'intervals') x = intervalsHTML(b, s);
+    else if (b.type === 'circuit') x = circuitHTML(s);
+    h += `<div class="tile c-${c}">${x}</div>`;
+  });
   h += `<label class="note">Notiz<textarea data-f="note" rows="3" placeholder="z. B. Knie, Befinden, Besonderheiten">${esc(s.note)}</textarea></label>`;
   if (s.status === 'open') {
     h += `<div class="actions"><button class="primary" data-act="finish">Einheit abschließen</button><button class="ghost" data-act="skip">Ausgelassen</button></div>`;
@@ -760,7 +780,7 @@ function ampelCard(date) {
   const c = state.checkins[date];
   if (c && !draft) {
     const l = dayLight(date);
-    return `<section class="card ampel">
+    return `<section class="card ampel lit-${l}">
       <div class="ampel-row"><span class="dot ${l}" aria-hidden="true"></span>
         <div><b>Erholungsampel: ${LIGHT_NAME[l]}</b><small>Ruhepuls gestern ${c.rhr ?? '–'} · ${VITAL[c.vital ?? 0]}${(c.feel || []).length ? ' · ' + c.feel.map(f => FEEL.find(x => x[0] === f)[1]).join(', ') : ''}${haOn(date).length ? ` · Kopfschmerz ${haMax(date) ?? '–'}/10` : ''}</small></div>
         <button class="mini" data-act="ampel-edit">Ändern</button></div>
@@ -768,7 +788,7 @@ function ampelCard(date) {
     </section>`;
   }
   const d = draft || { rhr: null, vital: 0, feel: [] };
-  return `<section class="card ampel">
+  return `<section class="card ampel lit-none">
     <h2>Erholungsampel</h2>
     <p class="hint">Morgens, vor Kaffee und Training. Ruhepuls: Health → Herz → Ruhepuls → „W“ → Balken von gestern. Dazu die Vitalwerte-App der Watch.</p>
     <label class="field">Ruhepuls gestern<input data-draft="rhr" value="${d.rhr ?? ''}" inputmode="numeric" placeholder="z. B. 66"></label>
@@ -790,9 +810,9 @@ function openThisWeek(day) {
     if (isMain(info.kind) && (st === 'open' || st === 'started')) open.push(info);
   }
   if (!open.length) return '';
-  return `<section class="card">
+  return `<section class="card open">
     <div class="label">Noch offen diese Woche</div>
-    ${open.map(i => `<button class="row" data-act="open-day" data-d="${i.date}"><span>${fmtDay(i.date)} · ${esc(dayTitle(i).title)}</span><span class="muted">nachholen ›</span></button>`).join('')}
+    ${open.map(i => `<button class="row" data-act="open-day" data-d="${i.date}"><span class="kd c-${dayCat(i.kind, 'normal', i.week)}">${fmtDay(i.date)} · ${esc(dayTitle(i).title)}</span><span class="muted">nachholen ›</span></button>`).join('')}
   </section>`;
 }
 
@@ -845,8 +865,9 @@ function renderWoche() {
     <div class="week-title"><b>${esc(weekLabel(w))}</b></div>
     <ul class="notes">${weekNotes(w).map(n => `<li>${esc(n)}</li>`).join('')}</ul>
     <div class="stat"><span>Ausdauer</span><b>${stats.minutes} / ${target} min</b></div>
-    <div class="bar" role="meter" aria-valuemin="0" aria-valuemax="${target}" aria-valuenow="${stats.minutes}" aria-label="Ausdauerminuten"><span style="width:${pct}%"></span></div>
+    <div class="bar c-aus" role="meter" aria-valuemin="0" aria-valuemax="${target}" aria-valuenow="${stats.minutes}" aria-label="Ausdauerminuten"><span style="width:${pct}%"></span></div>
     <div class="stat"><span>Kraft</span><b>${stats.kraft} / 2 Einheiten</b></div>
+    <div class="bar c-kraft" role="meter" aria-valuemin="0" aria-valuemax="2" aria-valuenow="${stats.kraft}" aria-label="Krafteinheiten"><span style="width:${Math.min(100, stats.kraft * 50)}%"></span></div>
     <p class="hint">Ziel ohne den optionalen Freitag; Freitagsminuten zählen mit.</p>
   </section>`;
   h += '<section class="card days">';
@@ -858,7 +879,7 @@ function renderWoche() {
     const t = dayTitle(info, s ? s.mode : 'normal');
     const stt = statusOf(d);
     const hasBlocks = blocksFor(info, s ? s.mode : 'normal').length > 0;
-    h += `<button class="row ${d === todayISO() ? 'today' : ''} ${isMain(info.kind) ? '' : 'light'}" data-act="open-day" data-d="${d}">
+    h += `<button class="row c-${dayCat(info.kind, s ? s.mode : 'normal', info.week)} ${d === todayISO() ? 'today' : ''} ${isMain(info.kind) ? '' : 'light'}" data-act="open-day" data-d="${d}">
       <span><small>${fmtDay(d)}</small>${esc(t.title)}</span>
       <span class="st ${stt}">${hasBlocks ? STATUS_ICON[stt] : ''}</span></button>`;
   }
@@ -881,7 +902,7 @@ function renderVerlauf() {
       <td class="r">${s.minutes}/${weekTarget(w)}</td><td class="r">${s.kraft}/2</td>
       <td class="lights">${lights.g ? `<span class="dot g"></span>${lights.g}` : ''} ${lights.y ? `<span class="dot y"></span>${lights.y}` : ''} ${lights.r ? `<span class="dot r"></span>${lights.r}` : ''}</td></tr>`);
   }
-  h += `<section class="card"><h2>Wochen</h2><div class="scroll"><table>
+  h += `<section class="card edge c-aus"><h2>Wochen</h2><div class="scroll"><table>
     <thead><tr><th>Woche ab</th><th>Plan</th><th class="r">Ausdauer</th><th class="r">Kraft</th><th>Ampel</th></tr></thead>
     <tbody>${rows.join('')}</tbody></table></div></section>`;
   // Kraftwerte
@@ -889,7 +910,7 @@ function renderVerlauf() {
   const hist = Object.keys(state.sessions).sort().reverse()
     .map(d => ({ d, sets: state.sessions[d].ex?.[route.exercise] }))
     .filter(x => x.sets && x.sets.some(y => y.ok)).slice(0, 20);
-  h += `<section class="card"><h2>Kraftwerte</h2>
+  h += `<section class="card edge c-kraft"><h2>Kraftwerte</h2>
     <label class="field"><select data-pick="exercise">${opts}</select></label>
     ${hist.length ? `<table><tbody>${hist.map(x => `<tr><td>${fmtShort(x.d)}</td><td>${esc(setsText(x.sets.filter(y => y.ok)))}</td></tr>`).join('')}</tbody></table>`
       : '<p class="muted">Noch keine erledigten Sätze.</p>'}
@@ -897,7 +918,7 @@ function renderVerlauf() {
   h += kopfSummaryCard();
   // Ampel
   const cks = Object.keys(state.checkins).sort().reverse().slice(0, 21);
-  h += `<section class="card"><h2>Erholungsampel</h2>
+  h += `<section class="card edge c-ok"><h2>Erholungsampel</h2>
     ${cks.length ? `<table><tbody>${cks.map(d => { const c = state.checkins[d], l = dayLight(d); return `<tr><td>${fmtDay(d)}</td><td><span class="dot ${l}"></span>${LIGHT_NAME[l]}</td><td class="r">${c.rhr ?? '–'}/min</td></tr>`; }).join('')}</tbody></table>`
       : '<p class="muted">Noch keine Einträge.</p>'}
   </section>`;
@@ -953,7 +974,7 @@ function renderMehr() {
       <li>Intervalle erst nach ärztlicher Freigabe (Belastungs-EKG bis zur Ausbelastung).</li>
       <li>Vorschlag auf Basis deiner Daten, kein ärztlicher Trainingsplan.</li></ul></details>
   </section>
-  <p class="foot muted">Version 1.8 · funktioniert offline · keine Daten verlassen das Gerät, außer du exportierst sie.</p>`;
+  <p class="foot muted">Version 1.9 · funktioniert offline · keine Daten verlassen das Gerät, außer du exportierst sie.</p>`;
   return h;
 }
 
