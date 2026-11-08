@@ -1,5 +1,5 @@
 // Offline-Cache. Bei jeder Änderung an den App-Dateien CACHE hochzählen, sonst sieht das iPhone die neue Fassung nicht.
-const CACHE = 'vo2max-v12';
+const CACHE = 'vo2max-v13';
 const FILES = [
   './',
   'index.html',
@@ -13,7 +13,9 @@ const FILES = [
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
+  // cache: 'reload' – Dateien frisch aus dem Netz, nicht aus dem HTTP-Zwischenspeicher (GitHub Pages: 10 min);
+  // sonst kann ein schnelles Folge-Update die alte Fassung einlagern (passiert am 08.11.2026 bei 1.9 → 1.9.1).
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES.map(f => new Request(f, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', e => {

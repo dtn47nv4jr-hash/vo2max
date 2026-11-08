@@ -978,7 +978,7 @@ function renderMehr() {
       <li>Intervalle erst nach ärztlicher Freigabe (Belastungs-EKG bis zur Ausbelastung).</li>
       <li>Vorschlag auf Basis deiner Daten, kein ärztlicher Trainingsplan.</li></ul></details>
   </section>
-  <p class="foot muted">Version 1.9.1 · funktioniert offline · keine Daten verlassen das Gerät, außer du exportierst sie.</p>`;
+  <p class="foot muted">Version 1.9.2 · funktioniert offline · keine Daten verlassen das Gerät, außer du exportierst sie.</p>`;
   return h;
 }
 
@@ -1488,7 +1488,7 @@ render();
 
 if ('serviceWorker' in navigator) {
   const hadController = !!navigator.serviceWorker.controller;
-  navigator.serviceWorker.register('sw.js').catch(() => {});
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {});
   navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) location.reload(); });
 }
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
