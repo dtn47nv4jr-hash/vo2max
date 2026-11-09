@@ -1,5 +1,5 @@
 // Offline-Cache. Bei jeder Änderung an den App-Dateien CACHE hochzählen, sonst sieht das iPhone die neue Fassung nicht.
-const CACHE = 'vo2max-v13';
+const CACHE = 'vo2max-v14';
 const FILES = [
   './',
   'index.html',

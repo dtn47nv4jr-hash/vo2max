@@ -42,7 +42,14 @@ const fmtLong = s => parseDate(s).toLocaleDateString('de-DE', { weekday: 'long',
 const fmtDay = s => parseDate(s).toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit' });
 const fmtShort = s => parseDate(s).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' });
 const fmtFull = s => parseDate(s).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
-const setsText = sets => sets.map(x => `${x.r ?? '–'}×${x.kg ? deNum(x.kg) : 'KG'}`).join(' · ');
+const setsText = sets => sets.map(x => `${x.fast ? '⚡' : ''}${x.r ?? '–'}×${x.kg ? deNum(x.kg) : 'KG'}`).join(' · ');
+// Schneller Satz (seit 1.10): je Satz wählbar; zählt nicht für Fortschrittsvorschlag und Startgewichte.
+const normalSets = sets => sets.filter(x => !x.fast);
+const FAST_HINT = '⚡ Schneller Satz: Drücken bzw. Ziehen so schnell wie möglich, zurück langsam in 2–3 s. Etwa 50–60 % des normalen Gewichts, 6–8 Wdh. Beim Drücken ausatmen, nicht pressen. Wird die Bewegung langsamer: Gewicht verringern.';
+function fastKg(id, kg) {
+  const step = EX[id].step || 2.5;
+  return kg ? Math.max(step, Math.round(kg * 0.55 / step) * step) : kg;
+}
 
 // ---------- Erholungsampel ----------
 const FEEL = [
@@ -423,8 +430,9 @@ function sessionBlocks(day, s) {
 
 function defaultSets(id, n, date) {
   const ex = EX[id], last = lastSets(id, date);
+  const ls = last ? (normalSets(last.sets).length ? normalSets(last.sets) : last.sets) : null;
   return Array.from({ length: n }, (_, i) => {
-    const prev = last && (last.sets[i] || last.sets[last.sets.length - 1]);
+    const prev = ls && (ls[i] || ls[ls.length - 1]);
     return { r: ex.reps[i] ?? ex.reps[ex.reps.length - 1], kg: prev ? prev.kg : ex.kg, ok: false };
   });
 }
@@ -482,7 +490,8 @@ function weekStats(monday) {
 
 function allHit(id, sets) {
   const reps = EX[id].reps;
-  return sets.length >= 2 && sets.every((x, i) => x.ok && (x.r ?? 0) >= (reps[i] ?? reps[reps.length - 1]));
+  const normal = sets.map((x, i) => [x, i]).filter(([x]) => !x.fast);
+  return normal.length >= 2 && normal.every(([x, i]) => x.ok && (x.r ?? 0) >= (reps[i] ?? reps[reps.length - 1]));
 }
 
 // ---------- Bausteine ----------
@@ -562,17 +571,18 @@ function exHTML(b, s, day) {
   const startText = ex.bw ? 'Körpergewicht' : `Start ${deNum(ex.kg)} kg`;
   let suggest = '';
   if (last && ex.step && !day.week.deload && s.mode !== 'easy' && allHit(b.id, last.sets)) {
-    const next = Math.max(...last.sets.map(x => x.kg || 0)) + ex.step;
-    if (sets.some(x => (x.kg || 0) < next)) {
+    const next = Math.max(...normalSets(last.sets).map(x => x.kg || 0)) + ex.step;
+    if (normalSets(sets).some(x => (x.kg || 0) < next)) {
       suggest = `<button class="suggest" data-act="suggest" data-kg="${next}">Letztes Mal alles geschafft → ${deNum(next)} kg übernehmen</button>`;
     }
   }
-  const rows = sets.map((x, i) => `<div class="set ${x.ok ? 'ok' : ''}">
+  const rows = sets.map((x, i) => `<div class="set ${x.ok ? 'ok' : ''} ${x.fast ? 'fast' : ''}">
       <span class="n">${i + 1}</span>
       <input class="reps" data-f="r" data-i="${i}" value="${x.r ?? ''}" inputmode="numeric" aria-label="Wiederholungen Satz ${i + 1}">
-      <span class="x">Wdh ×</span>
+      <span class="x" aria-hidden="true">×</span>
       <input class="kg" data-f="kg" data-i="${i}" value="${x.kg ? deNum(x.kg) : ''}" placeholder="${ex.bw ? 'KG' : '0'}" inputmode="decimal" aria-label="Gewicht Satz ${i + 1}">
       <span class="x">kg</span>
+      <button class="fastbtn" data-act="fast" data-i="${i}" aria-label="Satz ${i + 1} schnell ausführen" aria-pressed="${!!x.fast}">⚡</button>
       <button class="tick" data-act="setok" data-i="${i}" aria-label="Satz ${i + 1} erledigt" aria-pressed="${x.ok}">✓</button>
     </div>`).join('');
   return `<div class="block ex" data-ex="${b.id}">
@@ -581,10 +591,11 @@ function exHTML(b, s, day) {
     ${last ? `<div class="meta last">Letztes Mal ${fmtShort(last.date)}: ${esc(setsText(last.sets))}</div>` : ''}
     ${suggest}
     <div class="sets">${rows}</div>
+    ${sets.some(x => x.fast) ? `<p class="hint fast-hint">${esc(FAST_HINT)}</p>` : ''}
     <div class="ex-foot">
       <button class="mini" data-act="addset">+ Satz</button>
       ${sets.length > 1 ? '<button class="mini" data-act="delset">− Satz</button>' : ''}
-      <details class="more"><summary>Ausführung</summary><p>${esc(ex.hint)}</p></details>
+      <details class="more"><summary>Ausführung</summary><p>${esc(ex.hint)}</p><p>⚡ neben einem Satz macht ihn zum schnellen Satz (Schnellkraft); erneut tippen = normal.</p></details>
     </div>
   </div>`;
 }
@@ -978,7 +989,7 @@ function renderMehr() {
       <li>Intervalle erst nach ärztlicher Freigabe (Belastungs-EKG bis zur Ausbelastung).</li>
       <li>Vorschlag auf Basis deiner Daten, kein ärztlicher Trainingsplan.</li></ul></details>
   </section>
-  <p class="foot muted">Version 1.9.2 · funktioniert offline · keine Daten verlassen das Gerät, außer du exportierst sie.</p>`;
+  <p class="foot muted">Version 1.10 · funktioniert offline · keine Daten verlassen das Gerät, außer du exportierst sie.</p>`;
   return h;
 }
 
@@ -1239,7 +1250,7 @@ function exportCSV() {
     const title = info.week ? dayTitle(info, s.mode).title : s.kind;
     einheiten.push([fmtFull(d), title, info.week ? weekLabel(info.week) : '', STATUS_LABEL[statusOf(d)], s.mode, s.doneOn ? fmtFull(s.doneOn) : '', deNum(s.stand?.l), deNum(s.stand?.r), deNum(s.sit), s.note]);
     for (const [id, sets] of Object.entries(s.ex)) {
-      sets.forEach((x, i) => kraft.push([fmtFull(d), title, EX[id].name, i + 1, x.r ?? '', deNum(x.kg || 0), x.ok ? 'ja' : 'nein']));
+      sets.forEach((x, i) => kraft.push([fmtFull(d), title, EX[id].name, i + 1, x.r ?? '', deNum(x.kg || 0), x.ok ? 'ja' : 'nein', x.fast ? 'schnell' : 'normal']));
     }
     for (const [k, c] of Object.entries(s.cardio)) { const r = rowCalc(c); ausdauer.push([fmtFull(d), title, k === 'so' && isHome(s.mode) ? 'Sonntag zuhause' : (CARDIO_NAME[k] || k), c.min ?? '', c.dev, c.hr, deNum(c.watt), deNum(c.rpm), c.ok ? 'ja' : 'nein', c.lvl ?? '', fmtMMSS(c.tsec), deNum(c.dist), deNum(c.strokes), r ? fmtMMSS(r.split) : '']); }
     s.iv.forEach((x, i) => ausdauer.push([fmtFull(d), title, `Intervall ${i + 1}`, '', '', x.hr, '', '', x.ok ? 'ja' : 'nein']));
@@ -1251,7 +1262,7 @@ function exportCSV() {
   const t = todayISO();
   shareFiles([
     csvFile(`vo2max-einheiten-${t}.csv`, ['Datum', 'Einheit', 'Planwoche', 'Status', 'Variante', 'Erledigt am', 'Einbeinstand links (s)', 'Einbeinstand rechts (s)', 'Aufstehtest 30 s (Wdh.)', 'Notiz'], einheiten),
-    csvFile(`vo2max-kraft-${t}.csv`, ['Datum', 'Einheit', 'Übung', 'Satz', 'Wdh', 'kg', 'erledigt'], kraft),
+    csvFile(`vo2max-kraft-${t}.csv`, ['Datum', 'Einheit', 'Übung', 'Satz', 'Wdh', 'kg', 'erledigt', 'Ausführung'], kraft),
     csvFile(`vo2max-ausdauer-${t}.csv`, ['Datum', 'Einheit', 'Block', 'Minuten', 'Gerät', 'Puls', 'Watt', 'rpm / Schläge pro min', 'erledigt', 'Stufe', 'Zeit Gerät (min:s)', 'Strecke (m)', 'Schläge', 'Ø /500 m'], ausdauer),
     csvFile(`vo2max-ampel-${t}.csv`, ['Datum', 'Ruhepuls Vortag', 'Vitalwerte', 'Befinden', 'Ampel'], ampel),
     haCSV(t),
@@ -1289,7 +1300,7 @@ view.addEventListener('click', e => {
   const i = Number(t.dataset.i);
 
   // Aktionen innerhalb einer Einheit
-  if (date && ['check', 'setok', 'cok', 'ivok', 'round', 'suggest', 'addset', 'delset', 'mode', 'finish', 'skip', 'reopen'].includes(act)) {
+  if (date && ['check', 'setok', 'fast', 'cok', 'ivok', 'round', 'suggest', 'addset', 'delset', 'mode', 'finish', 'skip', 'reopen'].includes(act)) {
     const s = ensureSession(date);
     const day = dayInfo(state.settings, date);
     switch (act) {
@@ -1307,9 +1318,23 @@ view.addEventListener('click', e => {
       case 'cok': s.cardio[t.dataset.k].ok = !s.cardio[t.dataset.k].ok; break;
       case 'ivok': s.iv[i].ok = !s.iv[i].ok; break;
       case 'round': s.rounds[i] = !s.rounds[i]; break;
-      case 'suggest': s.ex[id].forEach(x => { x.kg = Number(t.dataset.kg); }); break;
+      case 'fast': { // seit 1.10: Satz schnell/normal; beim Einschalten ~55 % Gewicht und 8 Wdh., beim Ausschalten zurück
+        const set = s.ex[id][i];
+        if (!set.fast) {
+          set.fast = true; set.nkg = set.kg; set.nr = set.r;
+          if (!EX[id].bw) set.kg = fastKg(id, set.kg);
+          set.r = Math.min(set.r ?? 8, 8);
+        } else {
+          set.fast = false;
+          if (set.nkg !== undefined) set.kg = set.nkg;
+          if (set.nr !== undefined) set.r = set.nr;
+          delete set.nkg; delete set.nr;
+        }
+        break;
+      }
+      case 'suggest': s.ex[id].forEach(x => { if (!x.fast) x.kg = Number(t.dataset.kg); }); break;
       case 'addset': {
-        const sets = s.ex[id], prev = sets[sets.length - 1], reps = EX[id].reps;
+        const sets = s.ex[id], prev = normalSets(sets).pop() || sets[sets.length - 1], reps = EX[id].reps;
         sets.push({ r: reps[sets.length] ?? reps[reps.length - 1], kg: prev ? prev.kg : EX[id].kg, ok: false });
         break;
       }

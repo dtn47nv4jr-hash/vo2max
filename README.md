@@ -7,6 +7,7 @@ Persönliche Trainings-Web-App für das iPhone. Sie bietet jeden Tag die passend
 - Monatlicher 30-Sekunden-Aufstehtest im Balance-Block am Sonntag; Bulgarian Split Squats je Bein getrennt erfasst (seit 1.7).
 - Sonntag auch zuhause: „Zuhause Claude“ (Zone-2-Zirkel mit Band und Hanteln) oder „Zuhause Mark“ (Mark-Lauren-Videos der Reihe nach, dazu Balance, Griff und Stretch), seit 1.8.
 - Farben je Bereich (seit 1.9): Aufwärmen gelb, Kraft orange, Ausdauer blau, Intervalle rot, Balance violett, Beweglichkeit pink; jeder Baustein als farbige Kachel, Tage in der Wochenansicht mit Farbstreifen.
+- Schneller Satz (⚡) bei jeder Kraftübung wählbar: Gewicht etwa 55 %, 8 Wdh.; zählt nicht für den Fortschrittsvorschlag.
 - Rudergerät: Zeit, Strecke und Schläge vom Endbildschirm eintragen – die App rechnet Ø /500 m, Ø-Watt und Ø-Schlagzahl aus; eigener Hinweis zu Schlagzahl und Watt für Zone 2.
 - Kopfschmerz-Protokoll mit Schmerzmitteln, Nackenverspannung, Schlafposition, automatisch ergänztem Training am Vortag, Monatsübersicht und Bericht für den Arzt.
 - Funktioniert nach dem ersten Laden komplett offline (Service Worker).
